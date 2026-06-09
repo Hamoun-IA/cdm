@@ -68,3 +68,77 @@ Choix d'implémentation et écarts au plan, par phase (exigé par GOAL.md).
   dans l'image).
 - **UI web** : placeholder Vite/React en phase 0 (les 4 vues + design « panneau
   d'affichage de stade » sont l'objet de la phase 1, conformément au GOAL).
+
+## Phase 1 — Cockpit + moteur de cotes (2026-06-09)
+
+- **Sync The Odds API** (`server/src/sync/oddsApi.js`) : clé de sport découverte
+  au runtime via `GET /v4/sports?all=true` (gratuit) avec fallback regex si la clé
+  exacte `soccer_fifa_world_cup` venait à changer. Fetch quotidien 08h00 Brussels,
+  région `eu`, marché `h2h` = 1 crédit. Quota persisté (`x-requests-remaining` →
+  `sync_log.quota_remaining`), **refus de fetch < 20 crédits (sauf closing)**,
+  alerte Telegram < 100. Fenêtre de stockage : matchs à ≤ 48 h (J/J+1).
+- **Garde-fous suggestions réellement non contournables** : `POST /api/suggestions`
+  ignore le prix envoyé par l'agent dès qu'un snapshot existe en base — le serveur
+  recalcule meilleure cote, proba implicite dé-marginée (médiane des books complets),
+  edge, Kelly fractionné et plafond. Edge < MIN_EDGE → 422, rien n'est créé.
+  Suggestions OPEN expirées automatiquement quand le match commence.
+- **Brief 08h30** : généré du digest (sections vides omises, ≤ 25 lignes, programme
+  coupé en premier avec lien cockpit, jamais d'exclamation sur les suggestions).
+  Telegram HTML (plus sûr que MarkdownV2 pour l'échappement).
+- **UI React** : design « panneau d'affichage de stade » sobre — page claire
+  (papier de programme + grain discret), un seul élément sombre signature : le
+  **matchday strip** vert pelouse profond à chiffres « LED » (`--green-glow`),
+  présent sur toutes les vues, rafraîchi toutes les 60 s. Barlow Condensed
+  (display scores/KPIs), IBM Plex Sans (texte), `tabular-nums` sur toutes les
+  colonnes de chiffres. Pas de framework CSS, pas de router : hash-routing maison
+  (~10 lignes), fonts auto-hébergées via @fontsource (zéro requête externe au
+  runtime). Vues : Matchs (timeline par jour + filtres), Groupes (12 tableaux +
+  3es), Paris (KPIs, courbe SVG, encodage rapide, suggestions avec « Prendre »
+  pré-rempli Kelly), détail match (scoreboard + marché + sparklines de cotes).
+
+## Phase 2 — Boucle complète (2026-06-09)
+
+- **Closing lines** : tick cron 5 min ; capture pour les matchs à 5–15 min du
+  coup d'envoi sans snapshot closing — les matchs d'un même créneau partagent le
+  fetch (1 crédit/créneau). Autorisée même sous le seuil dur des 20 crédits
+  (contrainte GOAL n°5). La closing odds est reportée immédiatement sur les paris
+  ouverts (même bookmaker si dispo, sinon meilleure closing) → CLV avant même le
+  settlement. Le settlement (auto depuis la phase 0) recalcule le CLV si besoin.
+- **Projections de qualification** (`projectionsService.js`) : énumération
+  exhaustive des scénarios V/N/D des matchs restants (≤ 3^6 = 729) avec scores
+  représentatifs 1-0/0-0/0-1, classement complet recalculé par scénario (donc
+  tiebreakers h2h 2026 inclus). Approximation documentée : les égalités aux buts
+  exacts ne sont pas explorées. Verdicts certains (« qualifié quoi qu'il arrive »,
+  « mathématiquement éliminé ») + probabilités équiprobables indicatives.
+  Exposé sur `GET /api/groups/:code/projections`, affiché sur la fiche équipe.
+- **Vue Équipes** : grille par groupe + fiche (calendrier, forme V/N/D,
+  classement, scénarios de qualification).
+- **API-Football** : module optionnel (désactivé proprement sans clé), budget
+  interne 80 req/jour (marge sous les 100), mapping fixtures par coup d'envoi
+  exact + nom d'équipe, stats post-match priorisées sur les matchs pariés,
+  payload brut conservé dans `match_stats.raw_json`. Job nocturne 23h15.
+
+## Phase 3 — Phase finale (2026-06-09)
+
+- **Table Annexe C embarquée** (`server/src/data/third-place-allocation.json`) :
+  les 495 combinaisons extraites du PDF officiel FIFA (pdftotext + parsing strict,
+  validations : 495 = C(12,8) exact, valeurs == lettres de la clé, exemples
+  officiels 1 et 495 conformes, aucune auto-confrontation 1X vs 3X, chaque lettre
+  présente 330 fois = C(11,7)). Wikipedia ne reproduit pas la table — source
+  unique PDF, intégrité garantie par les contrôles combinatoires.
+- **Résolution des placeholders** (`bracketService.js`) : itérative jusqu'à
+  stabilité (les W/L cascadent). `1X`/`2X` dès que le groupe est fini ; `3…`
+  uniquement quand les 12 groupes sont finis (classement des 3es + Annexe C,
+  l'hôte `1X` du match venant de `hosts_by_match`) ; `WNN`/`LNN` au FINISHED du
+  match référencé (vainqueur = score final, puis tirs au but). Branchée après
+  chaque sync football-data + au démarrage.
+- **Vue bracket** : 5 colonnes 32es → finale + match pour la 3e place, vainqueur
+  en gras, placeholders en italique, liens vers les détails de match.
+- **Post-mortem hebdo** : `GET /api/digest/retro?days=7` — suggestions vs
+  résultats (hit rate vs proba moyenne estimée = écart de calibration), profit,
+  CLV moyen, meilleure/pire décision, bornes de bankroll. Consommé par l'Analyste.
+
+### Écart au plan assumé (phases 1-3)
+Les phases ont été livrées le même jour (le tournoi commence le 11/06) : les tags
+`phase-1/2/3` pointent donc sur des commits successifs rapprochés plutôt que sur
+des jalons espacés dans le temps. Le découpage fonctionnel du GOAL est respecté.

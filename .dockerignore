@@ -2,7 +2,7 @@
 node_modules
 **/node_modules
 data
-web
+web/dist
 wc26-cockpit-kit
 wc26-cockpit-kit.zip
 .env

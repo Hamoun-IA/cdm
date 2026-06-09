@@ -1,17 +1,24 @@
-# WC26 Cockpit — image unique (API + bot + jobs), PLAN §2.
-# node:22-slim (glibc) : prébuilds better-sqlite3 garantis.
+# WC26 Cockpit — image unique (API + bot + jobs + UI), PLAN §2.
+# Étape 1 : build du cockpit React.
+FROM node:22-slim AS webbuild
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web .
+RUN npm run build
+
+# Étape 2 : runtime (node:22-slim, prébuilds better-sqlite3 glibc).
 FROM node:22-slim
 
 WORKDIR /app
 
-# Dépendances serveur d'abord (cache de layers)
 COPY server/package.json server/package-lock.json server/
 RUN cd server && npm ci --omit=dev
 
-# Contrat de données + migrations + code
 COPY schema.sql ./
 COPY migrations ./migrations
 COPY server ./server
+COPY --from=webbuild /web/dist ./web/dist
 
 EXPOSE 3026
 
