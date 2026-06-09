@@ -1,0 +1,20 @@
+{
+  "name": "wc26-cockpit-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WC26 Cockpit — serveur API + sync + bot Telegram",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "seed": "node src/seed.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.0",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "grammy": "^1.39.1",
+    "node-cron": "^3.0.3"
+  }
+}
