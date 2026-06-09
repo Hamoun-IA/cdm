@@ -9,6 +9,8 @@ import { placeBet, listBets, patchBet, getBet } from '../services/betsService.js
 import { matchMarket } from '../services/marketService.js';
 import { createSuggestion, listSuggestions, takeSuggestion } from '../services/suggestionsService.js';
 import { digestToday, digestRetro } from '../services/digestService.js';
+import { groupProjections } from '../services/projectionsService.js';
+import { bracketView } from '../services/bracketService.js';
 
 const MATCH_SELECT = `
   SELECT m.*, th.name AS home_name, th.fifa_code AS home_code, th.flag_emoji AS home_flag,
@@ -53,6 +55,18 @@ export function apiRouter(db, { notify = null } = {}) {
 
   r.get('/standings/third-places', (req, res) => {
     res.json({ third_places: currentThirdPlaces(db) });
+  });
+
+  r.get('/groups/:code/projections', (req, res) => {
+    const code = String(req.params.code).toUpperCase();
+    if (!/^[A-L]$/.test(code)) return res.status(400).json({ error: 'Groupe invalide (A–L).' });
+    const proj = groupProjections(db, code);
+    if (!proj) return res.status(404).json({ error: 'Groupe introuvable.' });
+    res.json(proj);
+  });
+
+  r.get('/bracket', (req, res) => {
+    res.json(bracketView(db));
   });
 
   // ── Matchs ───────────────────────────────────────────────

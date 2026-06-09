@@ -7,8 +7,10 @@ import { config } from '../config.js';
 import { syncMatches, inActiveWindow } from '../sync/footballData.js';
 import { settleBetsForMatch } from '../services/betsService.js';
 import { syncOdds } from '../sync/oddsApi.js';
+import { syncApiFootballStats } from '../sync/apiFootball.js';
 import { expireStaleSuggestions } from '../services/suggestionsService.js';
 import { renderBrief } from '../services/briefService.js';
+import { resolvePlaceholders } from '../services/bracketService.js';
 
 /**
  * Règle tous les paris PENDING dont le match est FINISHED, notifie via le bot.
@@ -43,6 +45,7 @@ export function startScheduler(db, { notify } = {}) {
         if (inActiveWindow(db)) {
           await syncMatches(db);
           settlePendingBets(db, notify);
+          resolvePlaceholders(db);
         }
       } catch (e) {
         console.error('tick 15min :', e.message);
@@ -53,12 +56,15 @@ export function startScheduler(db, { notify } = {}) {
       try {
         await syncMatches(db);
         settlePendingBets(db, notify);
+        resolvePlaceholders(db);
       } catch (e) {
         console.error('tick quotidien :', e.message);
       }
     }, { timezone: config.tzDisplay }));
     // Sync de démarrage (non bloquant)
-    syncMatches(db).then(() => settlePendingBets(db, notify)).catch((e) => console.error('sync initial :', e.message));
+    syncMatches(db)
+      .then(() => { settlePendingBets(db, notify); resolvePlaceholders(db); })
+      .catch((e) => console.error('sync initial :', e.message));
   }
 
   // ── The Odds API ───────────────────────────────────────────
@@ -117,6 +123,15 @@ export function startScheduler(db, { notify } = {}) {
   tasks.push(cron.schedule('*/15 * * * *', () => {
     try { expireStaleSuggestions(db); } catch (e) { console.error('expire suggestions :', e.message); }
   }));
+
+  // ── API-Football (optionnel) : stats détaillées la nuit, 23h15 Brussels ───
+  if (config.apiFootballKey) {
+    tasks.push(cron.schedule('15 23 * * *', async () => {
+      try { await syncApiFootballStats(db); } catch (e) { console.error('api-football :', e.message); }
+    }, { timezone: config.tzDisplay }));
+  } else {
+    console.log('⏸ Module API-Football désactivé (API_FOOTBALL_KEY absente)');
+  }
 
   return {
     stop: () => tasks.forEach((t) => t.stop()),
