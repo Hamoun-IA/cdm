@@ -1,0 +1,19 @@
+# WC26 Cockpit — un service app + volume ./data (PLAN §2).
+# Bind 0.0.0.0:3026 ; la sécurité périmétrique est assurée par Tailscale.
+services:
+  cockpit:
+    build: .
+    container_name: wc26-cockpit
+    ports:
+      - "3026:3026"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3026/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

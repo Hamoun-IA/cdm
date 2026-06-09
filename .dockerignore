@@ -1,0 +1,10 @@
+.git
+node_modules
+**/node_modules
+data
+web
+wc26-cockpit-kit
+wc26-cockpit-kit.zip
+.env
+*.md
+!server/seed-data/*.json
