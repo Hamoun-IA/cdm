@@ -16,9 +16,11 @@ const db = getDb();
 ensureInit(db);
 recomputeAllStandings(db);
 
+const tg = createBot(db);
+
 const app = express();
 app.use(express.json());
-app.use('/api', apiRouter(db));
+app.use('/api', apiRouter(db, { notify: tg ? tg.notify : null }));
 
 // Cockpit React buildé (web/dist) si présent — sinon page d'attente.
 const webDist = path.join(ROOT_DIR, 'web', 'dist');
@@ -31,7 +33,6 @@ if (fs.existsSync(path.join(webDist, 'index.html'))) {
   );
 }
 
-const tg = createBot(db);
 if (tg) {
   tg.bot.start({ drop_pending_updates: true });
   console.log('🤖 Bot Telegram démarré (polling)');

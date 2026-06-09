@@ -6,6 +6,9 @@ import { brusselsDayBoundsUtc, brusselsDayKey, brusselsTime, nowUtcIso } from '.
 import { currentThirdPlaces } from '../services/standingsService.js';
 import { bankrollStats, ensureInit } from '../services/bankrollService.js';
 import { placeBet, listBets, patchBet, getBet } from '../services/betsService.js';
+import { matchMarket } from '../services/marketService.js';
+import { createSuggestion, listSuggestions, takeSuggestion } from '../services/suggestionsService.js';
+import { digestToday, digestRetro } from '../services/digestService.js';
 
 const MATCH_SELECT = `
   SELECT m.*, th.name AS home_name, th.fifa_code AS home_code, th.flag_emoji AS home_flag,
@@ -28,7 +31,7 @@ function decorateMatch(db, row) {
   };
 }
 
-export function apiRouter(db) {
+export function apiRouter(db, { notify = null } = {}) {
   const r = Router();
 
   // ── Groupes ──────────────────────────────────────────────
@@ -125,6 +128,65 @@ export function apiRouter(db) {
     const bet = getBet(db, Number(req.params.id));
     if (!bet) return res.status(404).json({ error: 'Pari introuvable.' });
     res.json({ bet });
+  });
+
+  // ── Marché & suggestions ─────────────────────────────────
+  r.get('/matches/:id/market', (req, res) => {
+    const m = db.prepare('SELECT id FROM matches WHERE id = ?').get(req.params.id);
+    if (!m) return res.status(404).json({ error: 'Match introuvable.' });
+    res.json(matchMarket(db, m.id));
+  });
+
+  r.get('/suggestions', (req, res) => {
+    res.json({ suggestions: listSuggestions(db, { status: req.query.status }) });
+  });
+
+  r.post('/suggestions', (req, res, next) => {
+    try {
+      res.status(201).json({ suggestion: createSuggestion(db, req.body) });
+    } catch (e) { next(e); }
+  });
+
+  r.post('/suggestions/:id/take', (req, res, next) => {
+    try {
+      const { bet, warnings } = takeSuggestion(db, Number(req.params.id), req.body || {});
+      res.status(201).json({ bet, warnings });
+    } catch (e) { next(e); }
+  });
+
+  r.patch('/suggestions/:id', (req, res, next) => {
+    try {
+      const { status } = req.body;
+      if (!['IGNORED', 'OPEN'].includes(status)) {
+        return res.status(400).json({ error: 'Seul le passage OPEN/IGNORED est permis ici.' });
+      }
+      const out = db.prepare("UPDATE suggestions SET status = ? WHERE id = ? AND status IN ('OPEN','IGNORED')")
+        .run(status, req.params.id);
+      if (!out.changes) return res.status(409).json({ error: 'Suggestion non modifiable.' });
+      res.json({ ok: true });
+    } catch (e) { next(e); }
+  });
+
+  // ── Digest & notify ──────────────────────────────────────
+  r.get('/digest/today', (req, res) => {
+    res.json(digestToday(db, req.query.date));
+  });
+
+  r.get('/digest/retro', (req, res) => {
+    const days = Math.max(1, Math.min(60, Number(req.query.days) || 7));
+    res.json(digestRetro(db, days));
+  });
+
+  r.post('/notify', async (req, res) => {
+    const text = req.body?.text;
+    if (!text) return res.status(400).json({ error: 'Champ « text » requis.' });
+    if (!notify) return res.status(503).json({ error: 'Bot Telegram non configuré.' });
+    try {
+      await notify(String(text));
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(502).json({ error: `Envoi Telegram échoué : ${e.message}` });
+    }
   });
 
   // ── Bankroll ─────────────────────────────────────────────
