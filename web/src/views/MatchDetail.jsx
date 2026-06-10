@@ -22,6 +22,19 @@ function Sparkline({ points }) {
 }
 
 const RELIABILITY_TAG = { haute: 'green', moyenne: 'amber', basse: 'brick' };
+const DECISION_FR = { BET: 'BET', WATCH: 'WATCH', PASS: 'PASS' };
+const REASONS_FR = {
+  PRICE_TOO_LOW: 'Cote trop basse',
+  DATA_INSUFFICIENT: 'Données insuffisantes',
+  SOURCE_UNRELIABLE: 'Source peu fiable',
+  LINEUP_UNCERTAIN: 'Compo incertaine',
+  TACTICAL_EDGE: 'Avantage tactique',
+  MARKET_VALUE: 'Value marché',
+  RISK_TOO_HIGH: 'Risque trop élevé',
+  BANKROLL_LIMIT: 'Limite bankroll',
+  MANUAL_INTEREST: 'Intérêt manuel',
+  NO_CLEAR_EDGE: 'Pas d’avantage clair',
+};
 
 function freshness(iso) {
   const mins = Math.round((Date.now() - new Date(iso)) / 60000);
@@ -99,6 +112,95 @@ function IntelCard({ intel }) {
 
 const ANALYZE_TIMEOUT_MS = 5 * 60 * 1000;
 
+function DecisionCard({ matchId, latest, history, onSaved }) {
+  const [decision, setDecision] = useState(latest?.decision || 'WATCH');
+  const [reasons, setReasons] = useState(latest?.reasons || []);
+  const [confidence, setConfidence] = useState(latest?.confidence || 3);
+  const [sourceQuality, setSourceQuality] = useState(latest?.source_quality || 3);
+  const [marketValue, setMarketValue] = useState(latest?.market_value || 3);
+  const [riskLevel, setRiskLevel] = useState(latest?.risk_level || 3);
+  const [notes, setNotes] = useState('');
+  const [msg, setMsg] = useState(null);
+
+  const toggleReason = (r) => {
+    setReasons((xs) => xs.includes(r) ? xs.filter((x) => x !== r) : [...xs, r]);
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setMsg(null);
+    try {
+      await api(`/matches/${matchId}/decisions`, {
+        method: 'POST',
+        body: {
+          decision, reasons, confidence: Number(confidence),
+          source_quality: Number(sourceQuality), market_value: Number(marketValue),
+          risk_level: Number(riskLevel), notes: notes || null,
+        },
+      });
+      setNotes('');
+      setMsg({ ok: true, text: 'Décision enregistrée.' });
+      onSaved();
+    } catch (e) {
+      setMsg({ ok: false, text: e.message });
+    }
+  };
+
+  return (
+    <div className="card decision-card" style={{ marginBottom: '.9rem' }}>
+      <h3>
+        Décision
+        <span className="note">
+          {latest ? `${DECISION_FR[latest.decision]} · ${latest.created_at?.slice(0, 16).replace('T', ' ')} UTC` : 'aucune décision'}
+        </span>
+      </h3>
+      {latest && (
+        <div className="decision-current">
+          <span className={`decision-badge d-${latest.decision}`}>{latest.decision}</span>
+          <span className="small muted">{latest.reasons?.map((r) => REASONS_FR[r] || r).join(' · ') || 'Sans raison structurée'}</span>
+          {latest.notes && <div className="decision-notes">{latest.notes}</div>}
+        </div>
+      )}
+      <form className="decision-form" onSubmit={submit}>
+        <div className="decision-row">
+          {['WATCH', 'PASS', 'BET'].map((d) => (
+            <button key={d} type="button" className={decision === d ? 'primary' : 'ghost'} onClick={() => setDecision(d)}>
+              {d}
+            </button>
+          ))}
+        </div>
+        <div className="reason-grid">
+          {Object.entries(REASONS_FR).map(([key, label]) => (
+            <label key={key} className={reasons.includes(key) ? 'reason active' : 'reason'}>
+              <input type="checkbox" checked={reasons.includes(key)} onChange={() => toggleReason(key)} />
+              {label}
+            </label>
+          ))}
+        </div>
+        <div className="score-grid">
+          <label>Confiance <input type="number" min="1" max="5" value={confidence} onChange={(e) => setConfidence(e.target.value)} /></label>
+          <label>Sources <input type="number" min="1" max="5" value={sourceQuality} onChange={(e) => setSourceQuality(e.target.value)} /></label>
+          <label>Marché <input type="number" min="1" max="5" value={marketValue} onChange={(e) => setMarketValue(e.target.value)} /></label>
+          <label>Risque <input type="number" min="1" max="5" value={riskLevel} onChange={(e) => setRiskLevel(e.target.value)} /></label>
+        </div>
+        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Note courte de décision…" />
+        <button className="primary" type="submit">Enregistrer</button>
+      </form>
+      {msg && <div className={msg.ok ? 'okbox' : 'errbox'}>{msg.text}</div>}
+      {history?.length > 1 && (
+        <div className="decision-history">
+          {history.slice(1, 5).map((d) => (
+            <div key={d.id}>
+              <span className={`decision-badge d-${d.decision}`}>{d.decision}</span>
+              <span className="small muted">{d.created_at?.slice(0, 16).replace('T', ' ')} UTC</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function MatchDetail({ id }) {
   const { data, loading, reload } = useApi(`/matches/${id}`, { refreshMs: 60000 });
   const { data: market } = useApi(`/matches/${id}/market`, { refreshMs: 120000 });
@@ -164,6 +266,8 @@ export default function MatchDetail({ id }) {
         </div>
         <div className="tm"><Flag emoji={m.away_flag} /> {m.away_display}</div>
       </div>
+
+      <DecisionCard matchId={id} latest={data.latest_decision} history={data.decisions || []} onSaved={reload} />
 
       <div className="analyze-bar">
         <button className="ghost" disabled={analyzing === 'pending'} onClick={requestAnalysis}>

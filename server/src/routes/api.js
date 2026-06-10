@@ -13,6 +13,7 @@ import { createIntel, latestIntel } from '../services/intelService.js';
 import { createAnalyzer } from '../services/analyzeService.js';
 import { groupProjections } from '../services/projectionsService.js';
 import { bracketView } from '../services/bracketService.js';
+import { createDecision, latestDecision, listDecisions } from '../services/decisionsService.js';
 
 const MATCH_SELECT = `
   SELECT m.*, th.name AS home_name, th.fifa_code AS home_code, th.flag_emoji AS home_flag,
@@ -99,6 +100,7 @@ export function apiRouter(db, { notify = null } = {}) {
     if (!row) return res.status(404).json({ error: 'Match introuvable.' });
     const bets = db.prepare('SELECT * FROM bets WHERE match_id = ? ORDER BY placed_at DESC').all(row.id);
     const suggestions = db.prepare('SELECT * FROM suggestions WHERE match_id = ? ORDER BY created_at DESC').all(row.id);
+    const decisions = listDecisions(db, { matchId: row.id });
     const odds = db.prepare(`
       SELECT bookmaker, market, outcome, price, point, taken_at, is_closing
       FROM odds_snapshots WHERE match_id = ? ORDER BY taken_at DESC LIMIT 100
@@ -107,7 +109,21 @@ export function apiRouter(db, { notify = null } = {}) {
     res.json({
       match: decorateMatch(db, row), bets, suggestions, odds_snapshots: odds, stats,
       intel: latestIntel(db, row.id),
+      latest_decision: latestDecision(db, row.id),
+      decisions,
     });
+  });
+
+  r.get('/decisions', (req, res, next) => {
+    try {
+      res.json({ decisions: listDecisions(db, { decision: req.query.decision }) });
+    } catch (e) { next(e); }
+  });
+
+  r.post('/matches/:id/decisions', (req, res, next) => {
+    try {
+      res.status(201).json({ decision: createDecision(db, Number(req.params.id), req.body) });
+    } catch (e) { next(e); }
   });
 
   // Fiche de renseignement du pod (Scout) — POST par OpenClaw.

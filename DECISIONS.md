@@ -214,3 +214,12 @@ des jalons espacés dans le temps. Le découpage fonctionnel du GOAL est respect
 - **UX d'analyse renforcée** : la page match signale maintenant les fiches Scout
   de plus de 24 h comme `à rafraîchir` et expose les suggestions Quant avec
   probabilité estimée, probabilité marché, agent/date et raisonnement complet.
+
+## Roadmap cockpit — Point 1 décisions structurées (2026-06-11)
+
+- Ajout d'un journal append-only `decisions` séparé des paris réels : `BET`,
+  `WATCH`, `PASS`, raisons structurées, scores 1–5, notes et historique par
+  match.
+- La fiche match expose la dernière décision, permet d'enregistrer une nouvelle
+  décision et conserve les décisions précédentes. Une décision ne crée jamais un
+  pari automatiquement.
