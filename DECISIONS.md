@@ -181,3 +181,17 @@ des jalons espacés dans le temps. Le découpage fonctionnel du GOAL est respect
   vert/ambre/brique, densité compacte. Aucun changement de logique/API.
 - Statuts de paris en pilules (`.pill .st-*`), strip en pilules arrondies,
   badge VOID/CASHOUT gris. theme-color #101418.
+
+## Post-livraison — Analyse à la demande (2026-06-10)
+
+- Bouton « Analyser maintenant » sur la page match : `POST /api/matches/:id/analyze`
+  → webhook `POST /hooks/agent` du gateway OpenClaw (agent `scout` uniquement,
+  token dédié, `hooks.allowedAgentIds`), 202 immédiat, cooldown serveur 3 min
+  par match. Le Scout publie sa fiche sur `/intel` ; l'UI la voit par polling.
+- **Module optionnel** (`OPENCLAW_HOOK_URL`/`OPENCLAW_HOOK_TOKEN` dans `.env`) :
+  conforme à la contrainte GOAL n°7 — sans ces variables le cockpit est
+  intégralement fonctionnel, le module s'affiche « désactivé » dans /api/health.
+- Infra (autorisée explicitement par David) : gateway OpenClaw passé de
+  loopback à **bind tailnet** (100.123.18.2:18789) pour être joignable depuis
+  le conteneur — tailnet uniquement, vérifié injoignable depuis l'IP publique,
+  webhook refusant sans token (401).
