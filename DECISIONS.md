@@ -142,3 +142,19 @@ Choix d'implémentation et écarts au plan, par phase (exigé par GOAL.md).
 Les phases ont été livrées le même jour (le tournoi commence le 11/06) : les tags
 `phase-1/2/3` pointent donc sur des commits successifs rapprochés plutôt que sur
 des jalons espacés dans le temps. Le découpage fonctionnel du GOAL est respecté.
+
+## Post-livraison — Exposition réseau (2026-06-10)
+
+- **Bind 0.0.0.0 abandonné** : le serveur n'est pas « accessible uniquement via
+  Tailscale » comme le supposait PLAN §2 — c'est un VPS avec IP publique
+  (72.61.165.220), et le port 3026 publié sur 0.0.0.0 exposait l'API sans auth
+  à Internet (vérifié par requête externe). Le compose publie désormais le port
+  sur `127.0.0.1` (pod OpenClaw local) et sur l'IP Tailscale `100.123.18.2`
+  → cockpit joignable sur le tailnet via `http://hermes-vps:3026`
+  (`hermes-vps.tail5327e7.ts.net`), invisible depuis Internet (vérifié).
+- `tailscale serve` (HTTPS 443 + MagicDNS) a été tenté puis abandonné : Caddy
+  détient déjà 0.0.0.0:443 sur l'hôte pour d'autres apps. HTTP brut sur le
+  tailnet est acceptable (chiffrement WireGuard de bout en bout).
+- Caveat : si l'IP Tailscale du nœud change, mettre à jour `docker-compose.yml` ;
+  au boot, si tailscale0 monte après Docker, le bind échoue puis est retenté par
+  la politique `restart: unless-stopped`.

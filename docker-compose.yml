@@ -1,11 +1,15 @@
 # WC26 Cockpit — un service app + volume ./data (PLAN §2).
-# Bind 0.0.0.0:3026 ; la sécurité périmétrique est assurée par Tailscale.
+# Bind loopback (pod OpenClaw local) + IP Tailscale (accès tailnet
+# http://hermes-vps:3026) — jamais 0.0.0.0 : le VPS a une IP publique et
+# l'API est sans auth. « La sécurité périmétrique est assurée par Tailscale »
+# — voir DECISIONS.md. Si l'IP Tailscale change, mettre à jour ici.
 services:
   cockpit:
     build: .
     container_name: wc26-cockpit
     ports:
-      - "3026:3026"
+      - "127.0.0.1:3026:3026"
+      - "100.123.18.2:3026:3026"
     env_file:
       - .env
     volumes:
