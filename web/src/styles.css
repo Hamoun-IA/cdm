@@ -362,6 +362,60 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
 }
 .decision-history { padding: .5rem .75rem .65rem; display: grid; gap: .35rem; border-top: 1px solid var(--line-soft); }
 
+/* ── Scorecard analyse ────────────────────────────────── */
+.score-summary {
+  padding: .65rem .75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem;
+  align-items: center;
+  border-bottom: 1px solid var(--line-soft);
+}
+.score-pill {
+  display: inline-flex;
+  gap: .35rem;
+  align-items: baseline;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: .2rem .45rem;
+  color: var(--ink-soft);
+  font-size: .72rem;
+}
+.score-pill b { color: var(--ink); }
+.score-notes { flex-basis: 100%; color: var(--ink-mid); line-height: 1.45; }
+.score-form {
+  padding: .65rem .75rem;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(80px, 1fr));
+  gap: .5rem;
+  align-items: end;
+}
+.score-form label { color: var(--ink-soft); font-size: .68rem; text-transform: uppercase; letter-spacing: .07em; }
+.score-form input, .score-form select {
+  width: 100%;
+  margin-top: .15rem;
+  padding: .25rem .35rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+}
+.score-form textarea {
+  grid-column: 1 / -1;
+  min-height: 4rem;
+  resize: vertical;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  padding: .45rem .55rem;
+  font: inherit;
+}
+.score-form button { justify-self: start; }
+@media (max-width: 900px) {
+  .score-form { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+}
+
 /* ── À décider ────────────────────────────────────────── */
 .decision-board { display: grid; gap: .55rem; }
 .decision-match {

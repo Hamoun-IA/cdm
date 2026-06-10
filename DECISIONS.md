@@ -232,3 +232,12 @@ des jalons espacés dans le temps. Le découpage fonctionnel du GOAL est respect
 - Ajout de l'onglet `À décider`, priorisé dans la navigation, pour ouvrir
   directement les matchs qui demandent une action sans parcourir tout le
   calendrier.
+
+## Roadmap cockpit — Point 3 scorecard match (2026-06-11)
+
+- Ajout de `match_scorecards` : grille semi-quantitative 0–5 pour qualité
+  d'analyse, fiabilité des sources, edge tactique, value marché et risque
+  lineup, avec recommandation `PASS`, `WATCH`, `ANALYZE_DEEPER` ou
+  `BET_POSSIBLE`.
+- La fiche match affiche la dernière scorecard et permet d'en enregistrer une
+  nouvelle. La scorecard reste une aide à l'analyse et ne crée jamais de pari.

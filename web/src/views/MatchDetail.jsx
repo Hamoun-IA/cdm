@@ -35,6 +35,12 @@ const REASONS_FR = {
   MANUAL_INTEREST: 'Intérêt manuel',
   NO_CLEAR_EDGE: 'Pas d’avantage clair',
 };
+const RECO_FR = {
+  PASS: 'PASS',
+  WATCH: 'WATCH',
+  ANALYZE_DEEPER: 'ANALYSE +',
+  BET_POSSIBLE: 'BET POSSIBLE',
+};
 
 function freshness(iso) {
   const mins = Math.round((Date.now() - new Date(iso)) / 60000);
@@ -201,6 +207,85 @@ function DecisionCard({ matchId, latest, history, onSaved }) {
   );
 }
 
+function ScorePill({ label, value }) {
+  return (
+    <div className="score-pill">
+      <span>{label}</span>
+      <b className="num">{value ?? '–'}/5</b>
+    </div>
+  );
+}
+
+function Scorecard({ matchId, latest, onSaved }) {
+  const [recommendation, setRecommendation] = useState(latest?.recommendation || 'WATCH');
+  const [analysisQuality, setAnalysisQuality] = useState(latest?.analysis_quality ?? 3);
+  const [sourceReliability, setSourceReliability] = useState(latest?.source_reliability ?? 3);
+  const [tacticalEdge, setTacticalEdge] = useState(latest?.tactical_edge ?? 2);
+  const [marketValue, setMarketValue] = useState(latest?.market_value ?? 2);
+  const [lineupRisk, setLineupRisk] = useState(latest?.lineup_risk ?? 3);
+  const [notes, setNotes] = useState('');
+  const [msg, setMsg] = useState(null);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setMsg(null);
+    try {
+      await api(`/matches/${matchId}/scorecards`, {
+        method: 'POST',
+        body: {
+          recommendation,
+          analysis_quality: Number(analysisQuality),
+          source_reliability: Number(sourceReliability),
+          tactical_edge: Number(tacticalEdge),
+          market_value: Number(marketValue),
+          lineup_risk: Number(lineupRisk),
+          notes: notes || null,
+        },
+      });
+      setNotes('');
+      setMsg({ ok: true, text: 'Scorecard enregistrée.' });
+      onSaved();
+    } catch (e) {
+      setMsg({ ok: false, text: e.message });
+    }
+  };
+
+  return (
+    <div className="card scorecard" style={{ marginBottom: '.9rem' }}>
+      <h3>
+        Scorecard analyse
+        <span className="note">{latest ? `${RECO_FR[latest.recommendation]} · ${latest.created_at?.slice(0, 16).replace('T', ' ')} UTC` : 'aucune grille'}</span>
+      </h3>
+      {latest && (
+        <div className="score-summary">
+          <span className={`tag ${latest.recommendation === 'BET_POSSIBLE' ? 'green' : latest.recommendation === 'PASS' ? 'brick' : 'amber'}`}>
+            {RECO_FR[latest.recommendation]}
+          </span>
+          <ScorePill label="Analyse" value={latest.analysis_quality} />
+          <ScorePill label="Sources" value={latest.source_reliability} />
+          <ScorePill label="Tactique" value={latest.tactical_edge} />
+          <ScorePill label="Marché" value={latest.market_value} />
+          <ScorePill label="Risque" value={latest.lineup_risk} />
+          {latest.notes && <div className="score-notes">{latest.notes}</div>}
+        </div>
+      )}
+      <form className="score-form" onSubmit={submit}>
+        <select value={recommendation} onChange={(e) => setRecommendation(e.target.value)}>
+          {Object.entries(RECO_FR).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+        </select>
+        <label>Analyse <input type="number" min="0" max="5" value={analysisQuality} onChange={(e) => setAnalysisQuality(e.target.value)} /></label>
+        <label>Sources <input type="number" min="0" max="5" value={sourceReliability} onChange={(e) => setSourceReliability(e.target.value)} /></label>
+        <label>Tactique <input type="number" min="0" max="5" value={tacticalEdge} onChange={(e) => setTacticalEdge(e.target.value)} /></label>
+        <label>Marché <input type="number" min="0" max="5" value={marketValue} onChange={(e) => setMarketValue(e.target.value)} /></label>
+        <label>Risque <input type="number" min="0" max="5" value={lineupRisk} onChange={(e) => setLineupRisk(e.target.value)} /></label>
+        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Commentaire court de scorecard…" />
+        <button className="primary" type="submit">Enregistrer</button>
+      </form>
+      {msg && <div className={msg.ok ? 'okbox' : 'errbox'}>{msg.text}</div>}
+    </div>
+  );
+}
+
 export default function MatchDetail({ id }) {
   const { data, loading, reload } = useApi(`/matches/${id}`, { refreshMs: 60000 });
   const { data: market } = useApi(`/matches/${id}/market`, { refreshMs: 120000 });
@@ -268,6 +353,7 @@ export default function MatchDetail({ id }) {
       </div>
 
       <DecisionCard matchId={id} latest={data.latest_decision} history={data.decisions || []} onSaved={reload} />
+      <Scorecard matchId={id} latest={data.latest_scorecard} onSaved={reload} />
 
       <div className="analyze-bar">
         <button className="ghost" disabled={analyzing === 'pending'} onClick={requestAnalysis}>
