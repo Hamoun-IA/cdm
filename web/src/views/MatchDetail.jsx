@@ -41,6 +41,7 @@ const RECO_FR = {
   ANALYZE_DEEPER: 'ANALYSE +',
   BET_POSSIBLE: 'BET POSSIBLE',
 };
+const VERDICT_FR = { GOOD: 'Bonne décision', BAD: 'À corriger', NEUTRAL: 'Neutre' };
 
 function freshness(iso) {
   const mins = Math.round((Date.now() - new Date(iso)) / 60000);
@@ -289,6 +290,74 @@ function Scorecard({ matchId, latest, onSaved }) {
   );
 }
 
+function DecisionPostmortems({ decisions, postmortems, onSaved }) {
+  const firstDecision = decisions?.[0]?.id || '';
+  const [decisionId, setDecisionId] = useState(firstDecision);
+  const [verdict, setVerdict] = useState('GOOD');
+  const [wouldChangeTo, setWouldChangeTo] = useState('');
+  const [lesson, setLesson] = useState('');
+  const [msg, setMsg] = useState(null);
+
+  useEffect(() => {
+    if (!decisionId && firstDecision) setDecisionId(firstDecision);
+  }, [decisionId, firstDecision]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!decisionId) return;
+    setMsg(null);
+    try {
+      await api(`/decisions/${decisionId}/postmortems`, {
+        method: 'POST',
+        body: { verdict, would_change_to: wouldChangeTo || null, lesson: lesson || null },
+      });
+      setLesson('');
+      setMsg({ ok: true, text: 'Post-mortem enregistré.' });
+      onSaved();
+    } catch (e) {
+      setMsg({ ok: false, text: e.message });
+    }
+  };
+
+  return (
+    <div className="card postmortem-card" style={{ marginBottom: '.9rem' }}>
+      <h3>Post-mortems décisions <span className="note">{postmortems?.length || 0}</span></h3>
+      {decisions?.length ? (
+        <form className="postmortem-form" onSubmit={submit}>
+          <select value={decisionId} onChange={(e) => setDecisionId(e.target.value)}>
+            {decisions.map((d) => (
+              <option key={d.id} value={d.id}>#{d.id} {d.decision} · {d.created_at?.slice(0, 16).replace('T', ' ')} UTC</option>
+            ))}
+          </select>
+          <select value={verdict} onChange={(e) => setVerdict(e.target.value)}>
+            {Object.entries(VERDICT_FR).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+          </select>
+          <select value={wouldChangeTo} onChange={(e) => setWouldChangeTo(e.target.value)}>
+            <option value="">Même décision</option>
+            {['BET', 'WATCH', 'PASS'].map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+          <textarea value={lesson} onChange={(e) => setLesson(e.target.value)} placeholder="Leçon à retenir…" />
+          <button className="primary" type="submit">Enregistrer</button>
+        </form>
+      ) : (
+        <p className="small muted" style={{ padding: '.65rem .75rem' }}>Aucune décision à analyser.</p>
+      )}
+      {msg && <div className={msg.ok ? 'okbox' : 'errbox'}>{msg.text}</div>}
+      {postmortems?.length ? (
+        <div className="postmortem-list">
+          {postmortems.slice(0, 5).map((p) => (
+            <div key={p.id} className="postmortem-item">
+              <span className={`tag ${p.verdict === 'GOOD' ? 'green' : p.verdict === 'BAD' ? 'brick' : 'ink'}`}>{VERDICT_FR[p.verdict]}</span>
+              <span className="small muted">décision #{p.decision_id} {p.decision}{p.would_change_to ? ` → ${p.would_change_to}` : ''}</span>
+              {p.lesson && <div>{p.lesson}</div>}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function MatchDetail({ id }) {
   const { data, loading, reload } = useApi(`/matches/${id}`, { refreshMs: 60000 });
   const { data: market } = useApi(`/matches/${id}/market`, { refreshMs: 120000 });
@@ -357,6 +426,7 @@ export default function MatchDetail({ id }) {
 
       <DecisionCard matchId={id} latest={data.latest_decision} history={data.decisions || []} onSaved={reload} />
       <Scorecard matchId={id} latest={data.latest_scorecard} onSaved={reload} />
+      <DecisionPostmortems decisions={data.decisions || []} postmortems={data.decision_postmortems || []} onSaved={reload} />
 
       <div className="analyze-bar">
         <button className="ghost" disabled={analyzing === 'pending'} onClick={requestAnalysis}>

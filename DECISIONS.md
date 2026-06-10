@@ -249,3 +249,11 @@ des jalons espacés dans le temps. Le découpage fonctionnel du GOAL est respect
   fraîcheur par défaut de 24 h.
 - L'API expose `freshness_status` (`fresh`/`stale`) et la vue `À décider`
   utilise cette expiration pour signaler les fiches Scout périmées.
+
+## Roadmap cockpit — Point 5 post-mortems de décisions (2026-06-11)
+
+- Ajout de `decision_postmortems` pour analyser a posteriori une décision
+  `BET`, `WATCH` ou `PASS`, même lorsqu'aucun pari réel n'a été placé.
+- La fiche match permet de rattacher une leçon à une décision existante, avec
+  verdict, décision de recul éventuelle et note libre. Cette analyse reste
+  séparée du journal de paris.

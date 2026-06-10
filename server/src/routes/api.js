@@ -16,6 +16,7 @@ import { bracketView } from '../services/bracketService.js';
 import { createDecision, latestDecision, listDecisions } from '../services/decisionsService.js';
 import { actionablesToday } from '../services/actionablesService.js';
 import { createScorecard, latestScorecard, listScorecards } from '../services/scorecardService.js';
+import { createDecisionPostmortem, listDecisionPostmortems } from '../services/decisionPostmortemService.js';
 
 const MATCH_SELECT = `
   SELECT m.*, th.name AS home_name, th.fifa_code AS home_code, th.flag_emoji AS home_flag,
@@ -107,6 +108,7 @@ export function apiRouter(db, { notify = null } = {}) {
     const bets = db.prepare('SELECT * FROM bets WHERE match_id = ? ORDER BY placed_at DESC').all(row.id);
     const suggestions = db.prepare('SELECT * FROM suggestions WHERE match_id = ? ORDER BY created_at DESC').all(row.id);
     const decisions = listDecisions(db, { matchId: row.id });
+    const decision_postmortems = listDecisionPostmortems(db, { matchId: row.id });
     const scorecards = listScorecards(db, row.id);
     const odds = db.prepare(`
       SELECT bookmaker, market, outcome, price, point, taken_at, is_closing
@@ -118,6 +120,7 @@ export function apiRouter(db, { notify = null } = {}) {
       intel: latestIntel(db, row.id),
       latest_decision: latestDecision(db, row.id),
       decisions,
+      decision_postmortems,
       latest_scorecard: latestScorecard(db, row.id),
       scorecards,
     });
@@ -138,6 +141,12 @@ export function apiRouter(db, { notify = null } = {}) {
   r.post('/matches/:id/scorecards', (req, res, next) => {
     try {
       res.status(201).json({ scorecard: createScorecard(db, Number(req.params.id), req.body) });
+    } catch (e) { next(e); }
+  });
+
+  r.post('/decisions/:id/postmortems', (req, res, next) => {
+    try {
+      res.status(201).json({ postmortem: createDecisionPostmortem(db, Number(req.params.id), req.body) });
     } catch (e) { next(e); }
   });
 
