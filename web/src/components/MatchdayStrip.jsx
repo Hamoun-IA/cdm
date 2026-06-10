@@ -2,6 +2,7 @@
 // vues, heure Brussels, score live, pastille parié. Heartbeat du tournoi.
 import React from 'react';
 import { useApi } from '../api.js';
+import Flag from './Flag.jsx';
 
 export default function MatchdayStrip() {
   const { data } = useApi('/matches?date=today', { refreshMs: 60000 });
@@ -22,11 +23,11 @@ export default function MatchdayStrip() {
               {m.has_open_bet && <span className="badge-bet" title="Pari ouvert" />}
             </span>
             <span className="m">
-              <span>{m.home_code || m.home_display}</span>
+              <span><Flag emoji={m.home_flag} /> {m.home_code || m.home_display}</span>
               <span className="sc num">
                 {m.home_score != null ? `${m.home_score}–${m.away_score}` : (done ? '—' : 'vs')}
               </span>
-              <span>{m.away_code || m.away_display}</span>
+              <span>{m.away_code || m.away_display} <Flag emoji={m.away_flag} /></span>
             </span>
           </a>
         );

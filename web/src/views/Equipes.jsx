@@ -1,6 +1,7 @@
 // Vue Équipes : grille des 48 fiches, regroupées par groupe.
 import React from 'react';
 import { useApi } from '../api.js';
+import Flag from '../components/Flag.jsx';
 
 export default function Equipes() {
   const { data, loading } = useApi('/teams');
@@ -29,7 +30,7 @@ export default function Equipes() {
               return (
                 <a key={t.id} className="card" href={`#/equipes/${t.id}`} style={{ padding: '.55rem .7rem', display: 'block', color: 'var(--ink)' }}>
                   <div style={{ fontFamily: 'var(--display)', fontSize: '1.15rem', fontWeight: 700, textTransform: 'uppercase' }}>
-                    {t.flag_emoji} {t.name}
+                    <Flag emoji={t.flag_emoji} /> {t.name}
                   </div>
                   <div className="small muted num">
                     {t.fifa_code}{s ? ` · ${s.points} pts · ${s.won}-${s.drawn}-${s.lost}` : ''}

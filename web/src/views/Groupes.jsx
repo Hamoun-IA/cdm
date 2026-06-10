@@ -2,6 +2,7 @@
 // Badges : vert = top 2 virtuel, ambre = repêchable 3e, brique = éliminé virtuel.
 import React from 'react';
 import { useApi } from '../api.js';
+import Flag from '../components/Flag.jsx';
 
 function stateOf(row) {
   if (row.qualification_state && row.qualification_state !== 'OPEN') return row.qualification_state;
@@ -26,7 +27,7 @@ function GroupTable({ code, table }) {
               <tr key={r.team_id}>
                 <td>
                   <span className={`qual-dot qual-${r.played > 0 ? stateOf(r) : 'OPEN'}`} />
-                  <a href={`#/equipes/${r.team_id}`}>{r.flag_emoji} {r.name}</a>
+                  <a href={`#/equipes/${r.team_id}`}><Flag emoji={r.flag_emoji} /> {r.name}</a>
                 </td>
                 <td className="num">{r.played}</td>
                 <td className="num">{gd > 0 ? `+${gd}` : gd}</td>
@@ -67,7 +68,7 @@ export default function Groupes() {
             {thirds.map((t) => (
               <tr key={t.team_id}>
                 <td className="num">{t.rank}</td>
-                <td><a href={`#/equipes/${t.team_id}`}>{t.flag_emoji} {t.name}</a></td>
+                <td><a href={`#/equipes/${t.team_id}`}><Flag emoji={t.flag_emoji} /> {t.name}</a></td>
                 <td>{t.group_code}</td>
                 <td className="num">{t.played}</td>
                 <td className="num">{t.goals_for - t.goals_against > 0 ? '+' : ''}{t.goals_for - t.goals_against}</td>

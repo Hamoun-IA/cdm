@@ -1,6 +1,7 @@
 // Fiche équipe : calendrier, forme, classement, scénarios de qualification.
 import React from 'react';
 import { useApi, fmtPct } from '../api.js';
+import Flag from '../components/Flag.jsx';
 import { MatchRow } from './Matchs.jsx';
 
 function Forme({ matches, teamId }) {
@@ -32,7 +33,7 @@ export default function EquipeDetail({ id }) {
   return (
     <>
       <p className="small"><a href="#/equipes">← Équipes</a></p>
-      <h2 className="view-title">{team.flag_emoji} {team.name}
+      <h2 className="view-title"><Flag emoji={team.flag_emoji} /> {team.name}
         <span className="note">{team.fifa_code} · Groupe {team.group_code}</span>
       </h2>
 

@@ -302,6 +302,16 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
   .scoreboard .tm { font-size: 1.1rem; }
 }
 
+/* ── Drapeaux (flag-icons) ────────────────────────────── */
+.flag {
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .10);
+  vertical-align: -.1em;
+}
+.scoreboard .flag { font-size: 1.25em; vertical-align: -.12em; }
+.strip-item .flag { font-size: .9em; }
+.view-title .flag { font-size: .95em; vertical-align: -.08em; }
+
 .loading { color: var(--ink-soft); padding: 2rem 0; text-align: center; font-size: .85rem; }
 .muted { color: var(--ink-soft); }
 .small { font-size: .74rem; }

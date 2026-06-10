@@ -2,6 +2,7 @@
 // marché dé-marginé, suggestions du pod et paris liés.
 import React from 'react';
 import { useApi, fmtEur, fmtPct, STAGE_FR, STATUS_FR, OUTCOME_FR } from '../api.js';
+import Flag from '../components/Flag.jsx';
 
 function Sparkline({ points }) {
   if (!points || points.length < 2) return null;
@@ -38,7 +39,7 @@ export default function MatchDetail({ id }) {
     <>
       <p className="small"><a href="#/matchs">← Calendrier</a></p>
       <div className="scoreboard">
-        <div className="tm h">{m.home_flag} {m.home_display}</div>
+        <div className="tm h">{m.home_display} <Flag emoji={m.home_flag} /></div>
         <div>
           <div className="big num">
             {m.home_score != null ? `${m.home_score}–${m.away_score}` : m.kickoff_brussels}
@@ -50,7 +51,7 @@ export default function MatchDetail({ id }) {
           </div>
           <div className="sub">{m.venue ? `${m.venue}, ` : ''}{m.city} · match n°{m.fifa_match_number}</div>
         </div>
-        <div className="tm">{m.away_flag} {m.away_display}</div>
+        <div className="tm"><Flag emoji={m.away_flag} /> {m.away_display}</div>
       </div>
 
       <div className="cols">
