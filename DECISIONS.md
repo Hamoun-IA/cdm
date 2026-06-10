@@ -168,3 +168,16 @@ des jalons espacés dans le temps. Le découpage fonctionnel du GOAL est respect
   le pod ne pouvait pas préparer les matchs du lendemain (constaté lors du test
   de la routine matinale du 10/06 : « aucun match » la veille du match
   d'ouverture). Testé (`test/digest.test.js`), suite à 71 tests verts.
+
+## Post-livraison — Refonte UI sombre B1 (2026-06-10)
+
+- Le brief design de GOAL.md (« fond clair neutre, pas de
+  dark-mode-par-défaut ») est remplacé à la demande de David par le thème
+  **B1 broadcast sombre sobre** — choisi via brainstorming visuel (3 directions,
+  puis 2 intensités, puis maquette pleine page validée). Spec faisant foi :
+  `docs/superpowers/specs/2026-06-10-ui-sombre-b1-design.md`.
+- Conservé : vernaculaire stade (typo condensée scores/KPIs, tabular-nums,
+  matchday strip signature — seul bloc teinté vert), sémantique
+  vert/ambre/brique, densité compacte. Aucun changement de logique/API.
+- Statuts de paris en pilules (`.pill .st-*`), strip en pilules arrondies,
+  badge VOID/CASHOUT gris. theme-color #101418.

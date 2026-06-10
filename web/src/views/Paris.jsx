@@ -17,7 +17,7 @@ function BankrollCurve({ history }) {
   const last = vals[vals.length - 1] >= vals[0];
   return (
     <svg className="bk-curve" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
-      <path d={`${d} L ${w - 2},${h - 2} L 2,${h - 2} Z`} fill={last ? 'rgba(25,92,54,.12)' : 'rgba(156,58,37,.10)'} stroke="none" />
+      <path d={`${d} L ${w - 2},${h - 2} L 2,${h - 2} Z`} fill={last ? 'rgba(76,195,138,.08)' : 'rgba(224,108,90,.08)'} stroke="none" />
       <path d={d} fill="none" stroke={last ? 'var(--green)' : 'var(--brick)'} strokeWidth="2" />
     </svg>
   );
@@ -167,7 +167,7 @@ export default function Paris() {
       {bk && (
         <>
           <div className="kpis">
-            <div className="kpi"><div className="lbl">Solde</div><div className="kpi-value num">{bk.balance.toFixed(2)} €</div><div className="sub">départ {fmtEur(bk.initial)}</div></div>
+            <div className="kpi lead"><div className="lbl">Solde</div><div className="kpi-value num">{bk.balance.toFixed(2)} €</div><div className="sub">départ {fmtEur(bk.initial)}</div></div>
             <div className="kpi"><div className="lbl">Profit</div><div className={`kpi-value num ${bk.profit >= 0 ? 'pos' : 'neg'}`}>{fmtSigned(bk.profit)}</div><div className="sub">€ sur paris réglés</div></div>
             <div className="kpi"><div className="lbl">ROI</div><div className={`kpi-value num ${bk.roi >= 0 ? 'pos' : 'neg'}`}>{fmtPct(bk.roi)}</div><div className="sub">vs bankroll initiale</div></div>
             <div className="kpi"><div className="lbl">Yield</div><div className="kpi-value num">{fmtPct(bk.yield)}</div><div className="sub">profit / misé</div></div>
@@ -218,7 +218,7 @@ export default function Paris() {
                 <td>{OUTCOME_FR[b.outcome] || b.outcome}</td>
                 <td className="num">{b.odds.toFixed(2)}</td>
                 <td className="num">{fmtEur(b.stake)}</td>
-                <td className={`status-${b.status}`}>{b.status}</td>
+                <td><span className={`pill st-${b.status}`}>{b.status}</span></td>
                 <td className="num">{b.payout != null ? fmtEur(b.payout) : '—'}</td>
                 <td className="num">{fmtPct(b.clv)}</td>
                 <td className="small muted">{b.source}</td>

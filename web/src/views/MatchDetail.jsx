@@ -105,7 +105,7 @@ export default function MatchDetail({ id }) {
                     <td>{OUTCOME_FR[b.outcome]}</td>
                     <td className="num">{b.odds.toFixed(2)}</td>
                     <td className="num">{fmtEur(b.stake)}</td>
-                    <td className={`status-${b.status}`}>{b.status}</td>
+                    <td><span className={`pill st-${b.status}`}>{b.status}</span></td>
                     <td className="num">{fmtPct(b.clv)}</td>
                   </tr>
                 ))}
