@@ -21,6 +21,35 @@ function Sparkline({ points }) {
   );
 }
 
+const RELIABILITY_TAG = { haute: 'green', moyenne: 'amber', basse: 'brick' };
+
+function freshness(iso) {
+  const mins = Math.round((Date.now() - new Date(iso)) / 60000);
+  if (mins < 60) return `il y a ${mins} min`;
+  if (mins < 48 * 60) return `il y a ${Math.round(mins / 60)} h`;
+  return `il y a ${Math.round(mins / 1440)} j`;
+}
+
+function IntelCard({ intel }) {
+  if (!intel) return null;
+  return (
+    <div className="card" style={{ marginBottom: '.9rem' }}>
+      <h3>
+        Renseignement Scout 🔭
+        <span className="note">
+          {intel.reliability && (
+            <span className={`tag ${RELIABILITY_TAG[intel.reliability] || 'ink'}`} style={{ marginRight: '.5rem' }}>
+              fiabilité {intel.reliability}
+            </span>
+          )}
+          {freshness(intel.created_at)}
+        </span>
+      </h3>
+      <div className="intel-body">{intel.content}</div>
+    </div>
+  );
+}
+
 export default function MatchDetail({ id }) {
   const { data, loading, reload } = useApi(`/matches/${id}`, { refreshMs: 60000 });
   const { data: market } = useApi(`/matches/${id}/market`, { refreshMs: 120000 });
@@ -53,6 +82,8 @@ export default function MatchDetail({ id }) {
         </div>
         <div className="tm"><Flag emoji={m.away_flag} /> {m.away_display}</div>
       </div>
+
+      <IntelCard intel={data.intel} />
 
       <div className="cols">
         <div className="card">

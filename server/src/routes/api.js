@@ -9,6 +9,7 @@ import { placeBet, listBets, patchBet, getBet } from '../services/betsService.js
 import { matchMarket } from '../services/marketService.js';
 import { createSuggestion, listSuggestions, takeSuggestion } from '../services/suggestionsService.js';
 import { digestToday, digestRetro } from '../services/digestService.js';
+import { createIntel, latestIntel } from '../services/intelService.js';
 import { groupProjections } from '../services/projectionsService.js';
 import { bracketView } from '../services/bracketService.js';
 
@@ -102,7 +103,17 @@ export function apiRouter(db, { notify = null } = {}) {
       FROM odds_snapshots WHERE match_id = ? ORDER BY taken_at DESC LIMIT 100
     `).all(row.id);
     const stats = db.prepare('SELECT * FROM match_stats WHERE match_id = ?').all(row.id);
-    res.json({ match: decorateMatch(db, row), bets, suggestions, odds_snapshots: odds, stats });
+    res.json({
+      match: decorateMatch(db, row), bets, suggestions, odds_snapshots: odds, stats,
+      intel: latestIntel(db, row.id),
+    });
+  });
+
+  // Fiche de renseignement du pod (Scout) — POST par OpenClaw.
+  r.post('/matches/:id/intel', (req, res, next) => {
+    try {
+      res.status(201).json({ intel: createIntel(db, Number(req.params.id), req.body) });
+    } catch (e) { next(e); }
   });
 
   // ── Équipes ──────────────────────────────────────────────

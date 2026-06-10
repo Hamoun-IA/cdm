@@ -302,6 +302,17 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
   .scoreboard .tm { font-size: 1.1rem; }
 }
 
+/* ── Renseignement Scout (page match) ─────────────────── */
+.intel-body {
+  padding: .6rem .75rem .7rem;
+  font-size: .82rem;
+  white-space: pre-wrap;
+  color: var(--ink-mid);
+  line-height: 1.5;
+  max-height: 22rem;
+  overflow-y: auto;
+}
+
 /* ── Drapeaux (flag-icons) ────────────────────────────── */
 .flag {
   border-radius: 2px;
