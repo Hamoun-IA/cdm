@@ -23,13 +23,24 @@ function BankrollCurve({ history }) {
   );
 }
 
-function EncodeForm({ matches, onDone }) {
+function EncodeForm({ matches, onDone, prefill }) {
   const [matchId, setMatchId] = useState('');
   const [outcome, setOutcome] = useState('home');
   const [odds, setOdds] = useState('');
   const [stake, setStake] = useState('');
   const [bookmaker, setBookmaker] = useState('');
   const [msg, setMsg] = useState(null);
+
+  // « Corriger » un pari : l'ancien est annulé (VOID), ses valeurs arrivent ici.
+  React.useEffect(() => {
+    if (!prefill) return;
+    setMatchId(String(prefill.match_id || ''));
+    setOutcome(prefill.outcome || 'home');
+    setOdds(prefill.odds != null ? String(prefill.odds) : '');
+    setStake(prefill.stake != null ? String(prefill.stake) : '');
+    setBookmaker(prefill.bookmaker || '');
+    setMsg({ ok: true, text: `Pari #${prefill.id} annulé (mise remboursée) — corrige puis ré-encode.` });
+  }, [prefill]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -130,6 +141,25 @@ export default function Paris() {
   );
   const bets = (betsData?.bets || []).filter((b) => !statusFilter || b.status === statusFilter);
   const reloadAll = () => { reloadBk(); reloadBets(); reloadSug(); };
+  const [prefill, setPrefill] = useState(null);
+  const [rowErr, setRowErr] = useState(null);
+
+  const voidBet = async (b) => {
+    if (!window.confirm(`Annuler le pari #${b.id} (${fmtEur(b.stake)} sur ${OUTCOME_FR[b.outcome]}) ? La mise est remboursée.`)) return;
+    setRowErr(null);
+    try { await api(`/bets/${b.id}`, { method: 'PATCH', body: { status: 'VOID' } }); reloadAll(); }
+    catch (e) { setRowErr(`Pari #${b.id} : ${e.message}`); }
+  };
+  const correctBet = async (b) => {
+    if (!window.confirm(`Corriger le pari #${b.id} ? Il sera annulé (mise remboursée) et ses valeurs pré-rempliront le formulaire.`)) return;
+    setRowErr(null);
+    try {
+      await api(`/bets/${b.id}`, { method: 'PATCH', body: { status: 'VOID' } });
+      reloadAll();
+      setPrefill({ ...b });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) { setRowErr(`Pari #${b.id} : ${e.message}`); }
+  };
 
   return (
     <>
@@ -151,7 +181,7 @@ export default function Paris() {
         </>
       )}
 
-      <EncodeForm matches={upcoming} onDone={reloadAll} />
+      <EncodeForm matches={upcoming} onDone={reloadAll} prefill={prefill} />
 
       <h2 className="view-title" style={{ marginTop: '1.4rem' }}>Suggestions ouvertes
         <span className="note">mise Kelly pré-remplie, modifiable — le pod suggère, toi seul décides</span>
@@ -174,9 +204,10 @@ export default function Paris() {
           {['PENDING', 'WON', 'LOST', 'VOID', 'CASHOUT'].map((s) => <option key={s}>{s}</option>)}
         </select>
       </div>
+      {rowErr && <div className="errbox" style={{ marginBottom: '.6rem' }}>{rowErr}</div>}
       <div className="card">
         <table>
-          <thead><tr><th>#</th><th>Match</th><th>Issue</th><th className="num">Cote</th><th className="num">Mise</th><th>Statut</th><th className="num">Payout</th><th className="num">CLV</th><th>Source</th></tr></thead>
+          <thead><tr><th>#</th><th>Match</th><th>Issue</th><th className="num">Cote</th><th className="num">Mise</th><th>Statut</th><th className="num">Payout</th><th className="num">CLV</th><th>Source</th><th></th></tr></thead>
           <tbody>
             {bets.map((b) => (
               <tr key={b.id}>
@@ -191,9 +222,17 @@ export default function Paris() {
                 <td className="num">{b.payout != null ? fmtEur(b.payout) : '—'}</td>
                 <td className="num">{fmtPct(b.clv)}</td>
                 <td className="small muted">{b.source}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  {b.status === 'PENDING' && (
+                    <>
+                      <button className="ghost" onClick={() => correctBet(b)}>Corriger</button>{' '}
+                      <button className="ghost" onClick={() => voidBet(b)}>Annuler</button>
+                    </>
+                  )}
+                </td>
               </tr>
             ))}
-            {!bets.length && <tr><td colSpan={9} className="muted">Aucun pari{statusFilter ? ` ${statusFilter}` : ''}.</td></tr>}
+            {!bets.length && <tr><td colSpan={10} className="muted">Aucun pari{statusFilter ? ` ${statusFilter}` : ''}.</td></tr>}
           </tbody>
         </table>
       </div>
