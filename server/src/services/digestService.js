@@ -9,11 +9,9 @@ import { lastQuota } from '../sync/oddsApi.js';
 
 const TOURNAMENT_DAY1 = '2026-06-11';
 
-export function digestToday(db, dayKey = brusselsDayKey()) {
+function matchesOfDay(db, dayKey) {
   const [start, end] = brusselsDayBoundsUtc(dayKey);
-  const dayNumber = Math.floor((new Date(`${dayKey}T12:00:00Z`) - new Date(`${TOURNAMENT_DAY1}T12:00:00Z`)) / 86400000) + 1;
-
-  const matches = db.prepare(`
+  return db.prepare(`
     SELECT m.*, th.name AS home_name, th.flag_emoji AS home_flag, th.fifa_code AS home_code,
            ta.name AS away_name, ta.flag_emoji AS away_flag, ta.fifa_code AS away_code
     FROM matches m
@@ -22,14 +20,29 @@ export function digestToday(db, dayKey = brusselsDayKey()) {
     WHERE m.kickoff_utc >= ? AND m.kickoff_utc < ?
     ORDER BY m.kickoff_utc, m.fifa_match_number
   `).all(start, end);
+}
 
-  const matchesEnriched = matches.map((m) => ({
+function enrich(db, m) {
+  return {
     ...m,
     home_display: m.home_name || m.home_placeholder,
     away_display: m.away_name || m.away_placeholder,
     kickoff_brussels: brusselsTime(m.kickoff_utc),
     market: matchMarket(db, m.id),
-  }));
+  };
+}
+
+export function digestToday(db, dayKey = brusselsDayKey()) {
+  const [start] = brusselsDayBoundsUtc(dayKey);
+  const dayNumber = Math.floor((new Date(`${dayKey}T12:00:00Z`) - new Date(`${TOURNAMENT_DAY1}T12:00:00Z`)) / 86400000) + 1;
+  const tomorrowKey = new Date(new Date(`${dayKey}T12:00:00Z`).getTime() + 86400000)
+    .toISOString().slice(0, 10);
+
+  const matches = matchesOfDay(db, dayKey);
+  const matchesEnriched = matches.map((m) => enrich(db, m));
+  // Le pod (Scout/Quant) et le sync de cotes couvrent J ET J+1 : le digest,
+  // leur point d'entrée unique, expose donc aussi les matchs du lendemain.
+  const matchesTomorrow = matchesOfDay(db, tomorrowKey).map((m) => enrich(db, m));
 
   const matchIds = matches.map((m) => m.id);
   const inClause = matchIds.length ? matchIds.join(',') : '-1';
@@ -80,6 +93,8 @@ export function digestToday(db, dayKey = brusselsDayKey()) {
     bets_today: todaysBets,
     open_suggestions: suggestions,
     matches: matchesEnriched,
+    date_tomorrow: tomorrowKey,
+    matches_tomorrow: matchesTomorrow,
     standings_concerned: standings,
     decisive_groups: groupsToday.filter((g) =>
       matches.some((m) => m.group_code === g && m.matchday === 3)),

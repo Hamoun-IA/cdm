@@ -158,3 +158,13 @@ des jalons espacés dans le temps. Le découpage fonctionnel du GOAL est respect
 - Caveat : si l'IP Tailscale du nœud change, mettre à jour `docker-compose.yml` ;
   au boot, si tailscale0 monte après Docker, le bind échoue puis est retenté par
   la politique `restart: unless-stopped`.
+
+## Post-livraison — Digest J+1 (2026-06-10)
+
+- `GET /api/digest/today` expose désormais `date_tomorrow` + `matches_tomorrow`
+  (mêmes enrichissements que `matches`). Justification : PLAN §7 disait « matchs
+  du jour », mais les SOUL du Scout/Quant et le sync de cotes (§4.3) travaillent
+  sur **J et J+1**, et le digest est le point d'entrée unique du pod — sans J+1,
+  le pod ne pouvait pas préparer les matchs du lendemain (constaté lors du test
+  de la routine matinale du 10/06 : « aucun match » la veille du match
+  d'ouverture). Testé (`test/digest.test.js`), suite à 71 tests verts.
