@@ -223,3 +223,12 @@ des jalons espacés dans le temps. Le découpage fonctionnel du GOAL est respect
 - La fiche match expose la dernière décision, permet d'enregistrer une nouvelle
   décision et conserve les décisions précédentes. Une décision ne crée jamais un
   pari automatiquement.
+
+## Roadmap cockpit — Point 2 vue À décider (2026-06-11)
+
+- Ajout de `GET /api/actionables/today` : un endpoint agrégé pour les matchs
+  aujourd'hui/demain, avec flags décision manquante, Scout absent/périmé, cotes
+  absentes, suggestion ouverte et pari ouvert.
+- Ajout de l'onglet `À décider`, priorisé dans la navigation, pour ouvrir
+  directement les matchs qui demandent une action sans parcourir tout le
+  calendrier.

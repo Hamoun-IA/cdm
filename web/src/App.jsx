@@ -13,6 +13,7 @@ import Groupes from './views/Groupes.jsx';
 import Equipes from './views/Equipes.jsx';
 import EquipeDetail from './views/EquipeDetail.jsx';
 import Bracket from './views/Bracket.jsx';
+import ADecider from './views/ADecider.jsx';
 
 function useHashRoute() {
   const [hash, setHash] = useState(window.location.hash || '#/matchs');
@@ -26,7 +27,7 @@ function useHashRoute() {
 }
 
 const TABS = [
-  ['matchs', 'Matchs'], ['groupes', 'Groupes'], ['paris', 'Paris'],
+  ['a-decider', 'À décider'], ['matchs', 'Matchs'], ['groupes', 'Groupes'], ['paris', 'Paris'],
   ['equipes', 'Équipes'], ['bracket', 'Tableau'],
 ];
 
@@ -35,7 +36,8 @@ export default function App() {
   const { data: bk } = useApi('/bankroll', { refreshMs: 60000 });
 
   let page = null;
-  if (view === 'paris') page = <Paris />;
+  if (view === 'a-decider') page = <ADecider />;
+  else if (view === 'paris') page = <Paris />;
   else if (view === 'groupes') page = <Groupes />;
   else if (view === 'equipes') page = param ? <EquipeDetail id={param} /> : <Equipes />;
   else if (view === 'bracket') page = <Bracket />;

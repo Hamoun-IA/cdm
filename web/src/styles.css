@@ -362,6 +362,39 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
 }
 .decision-history { padding: .5rem .75rem .65rem; display: grid; gap: .35rem; border-top: 1px solid var(--line-soft); }
 
+/* ── À décider ────────────────────────────────────────── */
+.decision-board { display: grid; gap: .55rem; }
+.decision-match {
+  display: grid;
+  grid-template-columns: 5.8rem 1fr 11rem;
+  gap: .8rem;
+  align-items: center;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--amber);
+  border-radius: 8px;
+  padding: .65rem .75rem;
+}
+.decision-match:hover { text-decoration: none; border-left-color: var(--green); }
+.dm-time { display: grid; gap: .12rem; color: var(--ink-soft); font-size: .72rem; }
+.dm-time .num { font-family: var(--display); font-size: 1.25rem; color: var(--ink); }
+.dm-main { min-width: 0; }
+.dm-title {
+  font-family: var(--display);
+  font-size: 1.2rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  line-height: 1.1;
+}
+.dm-flags { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .4rem; }
+.dm-side { display: grid; gap: .35rem; justify-items: end; text-align: right; }
+.empty-state { padding: .9rem; color: var(--ink-soft); }
+@media (max-width: 720px) {
+  .decision-match { grid-template-columns: 1fr; }
+  .dm-side { justify-items: start; text-align: left; }
+}
+
 /* ── Renseignement Scout (page match) ─────────────────── */
 .intel-body { padding: .15rem 0 .2rem; font-size: .82rem; }
 .intel-head {

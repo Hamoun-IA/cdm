@@ -14,6 +14,7 @@ import { createAnalyzer } from '../services/analyzeService.js';
 import { groupProjections } from '../services/projectionsService.js';
 import { bracketView } from '../services/bracketService.js';
 import { createDecision, latestDecision, listDecisions } from '../services/decisionsService.js';
+import { actionablesToday } from '../services/actionablesService.js';
 
 const MATCH_SELECT = `
   SELECT m.*, th.name AS home_name, th.fifa_code AS home_code, th.flag_emoji AS home_flag,
@@ -58,6 +59,10 @@ export function apiRouter(db, { notify = null } = {}) {
 
   r.get('/standings/third-places', (req, res) => {
     res.json({ third_places: currentThirdPlaces(db) });
+  });
+
+  r.get('/actionables/today', (req, res) => {
+    res.json(actionablesToday(db, req.query.date || null));
   });
 
   r.get('/groups/:code/projections', (req, res) => {
