@@ -26,6 +26,8 @@ test('createIntel : enregistre une fiche et latestIntel la rend', () => {
   assert.equal(last.content, 'ABSENCES A: aucune…');
   assert.equal(last.reliability, 'haute');
   assert.ok(last.created_at);
+  assert.ok(last.fresh_until);
+  assert.equal(last.freshness_status, 'fresh');
 });
 
 test('latestIntel : la plus récente fait foi, l\'historique est conservé', () => {
@@ -47,4 +49,16 @@ test('createIntel : 404 si match inconnu, 422 si contenu vide ou fiabilité inva
 test('latestIntel : null si aucune fiche', () => {
   const db = freshDb();
   assert.equal(latestIntel(db, 1), null);
+});
+
+test('createIntel : accepte une expiration explicite et expose le statut périmé', () => {
+  const db = freshDb();
+  const i = createIntel(db, 1, {
+    content: 'Compo incertaine',
+    fresh_until: '2026-06-10T08:00:00Z',
+    freshness_note: 'Avant conférence de presse',
+  });
+  assert.equal(i.fresh_until, '2026-06-10T08:00:00Z');
+  assert.equal(i.freshness_status, 'stale');
+  assert.equal(i.freshness_note, 'Avant conférence de presse');
 });

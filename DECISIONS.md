@@ -241,3 +241,11 @@ des jalons espacés dans le temps. Le découpage fonctionnel du GOAL est respect
   `BET_POSSIBLE`.
 - La fiche match affiche la dernière scorecard et permet d'en enregistrer une
   nouvelle. La scorecard reste une aide à l'analyse et ne crée jamais de pari.
+
+## Roadmap cockpit — Point 4 expiration des informations (2026-06-11)
+
+- Les fiches Scout portent désormais `fresh_until` et `freshness_note`. Si le
+  pod ne fournit pas d'expiration explicite, le serveur fixe une durée de
+  fraîcheur par défaut de 24 h.
+- L'API expose `freshness_status` (`fresh`/`stale`) et la vue `À décider`
+  utilise cette expiration pour signaler les fiches Scout périmées.

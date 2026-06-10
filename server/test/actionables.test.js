@@ -53,3 +53,15 @@ test('actionablesToday : intègre décision, cotes, suggestion et pari ouvert', 
   assert.ok(row.flags.includes('BET_OPEN'));
   assert.equal(row.flags.includes('DECISION_MISSING'), false);
 });
+
+test('actionablesToday : signale Scout périmé via fresh_until', () => {
+  const db = freshDb();
+  createDecision(db, 1, { decision: 'WATCH', reasons: ['MANUAL_INTEREST'] });
+  db.prepare(`
+    INSERT INTO match_intel (match_id, content, reliability, created_at, fresh_until)
+    VALUES (1, 'ancienne fiche', 'basse', '2026-06-10T08:00:00Z', '2026-06-10T10:00:00Z')
+  `).run();
+  const row = actionablesToday(db, '2026-06-11').matches[0];
+  assert.ok(row.flags.includes('SCOUT_STALE'));
+  assert.equal(row.intel.freshness_status, 'stale');
+});

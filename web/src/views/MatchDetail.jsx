@@ -49,11 +49,14 @@ function freshness(iso) {
   return `il y a ${Math.round(mins / 1440)} j`;
 }
 
-function freshnessMeta(iso) {
+function freshnessMeta(intel) {
+  const iso = intel.fresh_until || intel.created_at;
   const mins = Math.round((Date.now() - new Date(iso)) / 60000);
   return {
-    label: freshness(iso),
-    stale: mins >= 24 * 60,
+    label: intel.fresh_until
+      ? (mins > 0 ? `expiré ${freshness(iso)}` : `expire dans ${Math.abs(mins) < 60 ? `${Math.abs(mins)} min` : `${Math.round(Math.abs(mins) / 60)} h`}`)
+      : freshness(intel.created_at),
+    stale: intel.freshness_status === 'stale' || mins > 0,
   };
 }
 
@@ -90,7 +93,7 @@ function IntelSection({ s }) {
 
 function IntelCard({ intel }) {
   if (!intel) return null;
-  const fresh = freshnessMeta(intel.created_at);
+  const fresh = freshnessMeta(intel);
   const sections = parseIntel(intel.content)
     .filter((s) => s.label !== 'FIABILITÉ GLOBALE'); // déjà en tag dans l'entête
   const head = sections.length && sections[0].label?.startsWith('MATCH') ? sections.shift() : null;

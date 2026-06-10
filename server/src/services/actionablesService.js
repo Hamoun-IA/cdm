@@ -35,7 +35,7 @@ export function actionablesToday(db, day = null) {
     const odds = db.prepare('SELECT COUNT(*) AS n, MAX(taken_at) AS last_taken_at FROM odds_snapshots WHERE match_id = ?').get(m.id);
     const decisionMissing = !latest_decision;
     const scoutMissing = !intel;
-    const scoutStale = !!intel && isStale(intel.created_at);
+    const scoutStale = !!intel && (intel.freshness_status === 'stale' || isStale(intel.fresh_until || intel.created_at));
     const oddsMissing = odds.n === 0;
     const needsAction = decisionMissing || scoutMissing || scoutStale || open_suggestions > 0 || open_bets > 0;
     const flags = [];
@@ -53,7 +53,13 @@ export function actionablesToday(db, day = null) {
       kickoff_brussels: brusselsTime(m.kickoff_utc),
       day_brussels: brusselsDayKey(m.kickoff_utc),
       latest_decision,
-      intel: intel ? { id: intel.id, reliability: intel.reliability, created_at: intel.created_at } : null,
+      intel: intel ? {
+        id: intel.id,
+        reliability: intel.reliability,
+        created_at: intel.created_at,
+        fresh_until: intel.fresh_until,
+        freshness_status: intel.freshness_status,
+      } : null,
       open_bets,
       open_suggestions,
       has_odds: odds.n > 0,
