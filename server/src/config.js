@@ -30,4 +30,7 @@ export const config = {
   minEdge: num('MIN_EDGE', 0.03),
   dbPath: process.env.DB_PATH || path.join(ROOT_DIR, 'data', 'wc26.db'),
   cockpitUrl: process.env.COCKPIT_URL || 'http://localhost:3026',
+  // Webhook du gateway OpenClaw (module optionnel « analyse à la demande »)
+  openclawHookUrl: process.env.OPENCLAW_HOOK_URL || '',
+  openclawHookToken: process.env.OPENCLAW_HOOK_TOKEN || '',
 };

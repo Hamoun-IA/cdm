@@ -1,7 +1,7 @@
 // Détail match : tableau d'affichage, cotes (sparkline des snapshots),
 // marché dé-marginé, suggestions du pod et paris liés.
-import React from 'react';
-import { useApi, fmtEur, fmtPct, STAGE_FR, STATUS_FR, OUTCOME_FR } from '../api.js';
+import React, { useEffect, useRef, useState } from 'react';
+import { api, useApi, fmtEur, fmtPct, STAGE_FR, STATUS_FR, OUTCOME_FR } from '../api.js';
 import Flag from '../components/Flag.jsx';
 
 function Sparkline({ points }) {
@@ -87,9 +87,44 @@ function IntelCard({ intel }) {
   );
 }
 
+const ANALYZE_TIMEOUT_MS = 5 * 60 * 1000;
+
 export default function MatchDetail({ id }) {
   const { data, loading, reload } = useApi(`/matches/${id}`, { refreshMs: 60000 });
   const { data: market } = useApi(`/matches/${id}/market`, { refreshMs: 120000 });
+
+  // Analyse à la demande : 202 immédiat, puis on guette la nouvelle fiche intel.
+  const [analyzing, setAnalyzing] = useState(null); // null | 'pending' | message d'erreur
+  const baseline = useRef(null); // created_at de la fiche au moment de la demande
+  const startedAt = useRef(0);
+
+  useEffect(() => {
+    if (analyzing !== 'pending') return;
+    const tick = setInterval(() => {
+      if (Date.now() - startedAt.current > ANALYZE_TIMEOUT_MS) {
+        setAnalyzing('Pas de fiche reçue après 5 min — vérifie le pod (openclaw cron runs) ou réessaie.');
+      } else reload();
+    }, 10000);
+    return () => clearInterval(tick);
+  }, [analyzing, reload]);
+
+  useEffect(() => {
+    if (analyzing === 'pending' && data?.intel?.created_at && data.intel.created_at !== baseline.current) {
+      setAnalyzing(null); // la nouvelle fiche est arrivée
+    }
+  }, [data, analyzing]);
+
+  const requestAnalysis = async () => {
+    setAnalyzing('pending');
+    baseline.current = data?.intel?.created_at || null;
+    startedAt.current = Date.now();
+    try {
+      await api(`/matches/${id}/analyze`, { method: 'POST' });
+    } catch (e) {
+      setAnalyzing(e.message);
+    }
+  };
+
   if (loading) return <div className="loading">Chargement…</div>;
   if (!data?.match) return <div className="errbox">Match introuvable.</div>;
   const m = data.match;
@@ -118,6 +153,14 @@ export default function MatchDetail({ id }) {
           <div className="sub">{m.venue ? `${m.venue}, ` : ''}{m.city} · match n°{m.fifa_match_number}</div>
         </div>
         <div className="tm"><Flag emoji={m.away_flag} /> {m.away_display}</div>
+      </div>
+
+      <div className="analyze-bar">
+        <button className="ghost" disabled={analyzing === 'pending'} onClick={requestAnalysis}>
+          {analyzing === 'pending' ? '🔭 Analyse en cours…' : '🔭 Analyser maintenant'}
+        </button>
+        {analyzing === 'pending' && <span className="small muted">le Scout enquête, la fiche apparaîtra ici (~2 min)</span>}
+        {analyzing && analyzing !== 'pending' && <span className="small" style={{ color: 'var(--brick)' }}>{analyzing}</span>}
       </div>
 
       <IntelCard intel={data.intel} />

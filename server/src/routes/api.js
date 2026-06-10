@@ -10,6 +10,7 @@ import { matchMarket } from '../services/marketService.js';
 import { createSuggestion, listSuggestions, takeSuggestion } from '../services/suggestionsService.js';
 import { digestToday, digestRetro } from '../services/digestService.js';
 import { createIntel, latestIntel } from '../services/intelService.js';
+import { createAnalyzer } from '../services/analyzeService.js';
 import { groupProjections } from '../services/projectionsService.js';
 import { bracketView } from '../services/bracketService.js';
 
@@ -113,6 +114,15 @@ export function apiRouter(db, { notify = null } = {}) {
   r.post('/matches/:id/intel', (req, res, next) => {
     try {
       res.status(201).json({ intel: createIntel(db, Number(req.params.id), req.body) });
+    } catch (e) { next(e); }
+  });
+
+  // Analyse à la demande : déclenche le Scout via le webhook OpenClaw (202,
+  // le résultat arrive ensuite en fiche intel).
+  const analyzer = createAnalyzer({ url: config.openclawHookUrl, token: config.openclawHookToken });
+  r.post('/matches/:id/analyze', async (req, res, next) => {
+    try {
+      res.status(202).json(await analyzer.requestAnalysis(db, Number(req.params.id)));
     } catch (e) { next(e); }
   });
 
@@ -243,6 +253,7 @@ export function apiRouter(db, { notify = null } = {}) {
         odds_api: config.oddsApiKey ? 'actif' : 'désactivé (ODDS_API_KEY absent)',
         api_football: config.apiFootballKey ? 'actif' : 'désactivé (API_FOOTBALL_KEY absent)',
         telegram: config.telegramBotToken ? 'actif' : 'désactivé (TELEGRAM_BOT_TOKEN absent)',
+        openclaw_hook: analyzer.enabled ? 'actif' : 'désactivé (OPENCLAW_HOOK_URL/TOKEN absents)',
       },
     });
   });

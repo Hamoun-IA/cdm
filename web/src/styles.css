@@ -302,6 +302,8 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
   .scoreboard .tm { font-size: 1.1rem; }
 }
 
+.analyze-bar { display: flex; align-items: center; gap: .7rem; margin-bottom: .6rem; flex-wrap: wrap; }
+
 /* ── Renseignement Scout (page match) ─────────────────── */
 .intel-body { padding: .15rem 0 .2rem; font-size: .82rem; }
 .intel-head {
