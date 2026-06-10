@@ -303,14 +303,26 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
 }
 
 /* ── Renseignement Scout (page match) ─────────────────── */
-.intel-body {
-  padding: .6rem .75rem .7rem;
-  font-size: .82rem;
-  white-space: pre-wrap;
-  color: var(--ink-mid);
-  line-height: 1.5;
-  max-height: 22rem;
-  overflow-y: auto;
+.intel-body { padding: .15rem 0 .2rem; font-size: .82rem; }
+.intel-head {
+  padding: .45rem .75rem .35rem; color: var(--ink-soft);
+  font-size: .7rem; text-transform: uppercase; letter-spacing: .07em;
+}
+.intel-sec {
+  display: grid; grid-template-columns: 9.5rem 1fr; gap: .8rem;
+  padding: .5rem .75rem; border-top: 1px solid var(--line-soft);
+}
+.intel-lbl {
+  font-size: .66rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--ink-soft); font-weight: 600; padding-top: .15rem;
+}
+.intel-txt { color: var(--ink-mid); line-height: 1.55; min-width: 0; }
+.intel-txt p { margin: 0 0 .35rem; }
+.intel-txt p:last-child { margin-bottom: 0; }
+.intel-sec.signal { background: var(--green-bg); border-left: 3px solid var(--green); }
+.intel-sec.signal .intel-lbl, .intel-sec.signal .intel-txt { color: var(--ink); }
+@media (max-width: 640px) {
+  .intel-sec { grid-template-columns: 1fr; gap: .15rem; }
 }
 
 /* ── Drapeaux (flag-icons) ────────────────────────────── */

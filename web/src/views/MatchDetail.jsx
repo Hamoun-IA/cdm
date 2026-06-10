@@ -30,8 +30,42 @@ function freshness(iso) {
   return `il y a ${Math.round(mins / 1440)} j`;
 }
 
+// Découpe la fiche par sections « LABEL: texte » (template templates/fiche_scout.md).
+// Les lignes sans label connu sont rattachées à la section courante ; si rien
+// n'est parsé, on retombe sur le texte brut.
+const INTEL_LABEL = /^([A-ZÀÂÄÉÈÊËÎÏÔÖÙÛÜÇ][A-ZÀÂÄÉÈÊËÎÏÔÖÙÛÜÇ' .#]{2,40}?)\s*:\s*(.*)$/;
+function parseIntel(content) {
+  const sections = [];
+  for (const raw of content.split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(INTEL_LABEL);
+    if (m) sections.push({ label: m[1].trim(), text: m[2] });
+    else if (sections.length) sections[sections.length - 1].text += `\n${line}`;
+    else sections.push({ label: null, text: line });
+  }
+  return sections;
+}
+
+function IntelSection({ s }) {
+  const signal = s.label === 'SIGNAL FORT';
+  // les deux équipes séparées par « | » dans ABSENCES / COMPO PROBABLE
+  const parts = s.text.includes(' | ') ? s.text.split(' | ') : [s.text];
+  return (
+    <div className={`intel-sec${signal ? ' signal' : ''}`}>
+      {s.label && <div className="intel-lbl">{s.label}</div>}
+      <div className="intel-txt">
+        {parts.map((p, i) => <p key={i}>{p}</p>)}
+      </div>
+    </div>
+  );
+}
+
 function IntelCard({ intel }) {
   if (!intel) return null;
+  const sections = parseIntel(intel.content)
+    .filter((s) => s.label !== 'FIABILITÉ GLOBALE'); // déjà en tag dans l'entête
+  const head = sections.length && sections[0].label?.startsWith('MATCH') ? sections.shift() : null;
   return (
     <div className="card" style={{ marginBottom: '.9rem' }}>
       <h3>
@@ -45,7 +79,10 @@ function IntelCard({ intel }) {
           {freshness(intel.created_at)}
         </span>
       </h3>
-      <div className="intel-body">{intel.content}</div>
+      <div className="intel-body">
+        {head && <div className="intel-head num">{head.label}: {head.text}</div>}
+        {sections.map((s, i) => <IntelSection key={i} s={s} />)}
+      </div>
     </div>
   );
 }
