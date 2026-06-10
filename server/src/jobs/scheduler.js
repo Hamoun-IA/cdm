@@ -4,6 +4,7 @@
 
 import cron from 'node-cron';
 import { config } from '../config.js';
+import { nowUtcIso } from '../lib/time.js';
 import { syncMatches, inActiveWindow } from '../sync/footballData.js';
 import { settleBetsForMatch } from '../services/betsService.js';
 import { syncOdds } from '../sync/oddsApi.js';
@@ -31,6 +32,34 @@ export function settlePendingBets(db, notify) {
       }
     }
   }
+}
+
+export function recordClosingAttempts(db, matchIds, result = {}) {
+  if (!matchIds.length) return 0;
+  const matched = new Set(result.matchedLocalIds || []);
+  const status = result.error ? 'ERROR' : null;
+  const detail = result.error || `${result.snapshots || 0} snapshots`;
+  const ins = db.prepare(`
+    INSERT INTO closing_attempts (match_id, attempted_at, status, detail)
+    VALUES (@match_id, @attempted_at, @status, @detail)
+    ON CONFLICT(match_id) DO UPDATE SET
+      attempted_at = excluded.attempted_at,
+      status = excluded.status,
+      detail = excluded.detail
+  `);
+  const attemptedAt = nowUtcIso();
+  const tx = db.transaction(() => {
+    for (const matchId of matchIds) {
+      ins.run({
+        match_id: matchId,
+        attempted_at: attemptedAt,
+        status: status || (matched.has(matchId) ? 'MATCHED' : 'NO_MATCH'),
+        detail,
+      });
+    }
+  });
+  tx();
+  return matchIds.length;
 }
 
 export function startScheduler(db, { notify } = {}) {
@@ -86,9 +115,11 @@ export function startScheduler(db, { notify } = {}) {
           WHERE status IN ('SCHEDULED','TIMED')
             AND strftime('%s', kickoff_utc) - strftime('%s', 'now') BETWEEN 300 AND 900
             AND id NOT IN (SELECT DISTINCT match_id FROM odds_snapshots WHERE is_closing = 1)
+            AND id NOT IN (SELECT match_id FROM closing_attempts)
         `).all().map((r) => r.id);
         if (soon.length) {
-          await syncOdds(db, { closing: true, closingMatchIds: soon, notify });
+          const result = await syncOdds(db, { closing: true, closingMatchIds: soon, notify });
+          recordClosingAttempts(db, soon, result);
           // Reporte la closing line sur les paris ouverts (meilleur closing dispo)
           for (const matchId of soon) {
             const best = db.prepare(`

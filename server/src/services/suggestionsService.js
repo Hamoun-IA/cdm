@@ -102,6 +102,10 @@ export function takeSuggestion(db, id, { stake, bookmaker, odds } = {}) {
   const sug = db.prepare('SELECT * FROM suggestions WHERE id = ?').get(id);
   if (!sug) throw httpError(404, `Suggestion ${id} introuvable.`);
   if (sug.status !== 'OPEN') throw httpError(409, `Suggestion ${id} déjà ${sug.status}.`);
+  const match = db.prepare('SELECT status FROM matches WHERE id = ?').get(sug.match_id);
+  if (!match || !['SCHEDULED', 'TIMED'].includes(match.status)) {
+    throw httpError(409, `Suggestion ${id} non prenable : match ${match ? match.status : 'introuvable'}.`);
+  }
   const realStake = stake != null ? Number(stake) : sug.suggested_stake;
   const realOdds = odds != null ? Number(odds) : sug.best_price;
   const { bet, warnings } = placeBet(db, {

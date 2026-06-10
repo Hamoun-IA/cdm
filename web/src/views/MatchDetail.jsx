@@ -30,6 +30,14 @@ function freshness(iso) {
   return `il y a ${Math.round(mins / 1440)} j`;
 }
 
+function freshnessMeta(iso) {
+  const mins = Math.round((Date.now() - new Date(iso)) / 60000);
+  return {
+    label: freshness(iso),
+    stale: mins >= 24 * 60,
+  };
+}
+
 // Découpe la fiche par sections « LABEL: texte » (template templates/fiche_scout.md).
 // Les lignes sans label connu sont rattachées à la section courante ; si rien
 // n'est parsé, on retombe sur le texte brut.
@@ -63,6 +71,7 @@ function IntelSection({ s }) {
 
 function IntelCard({ intel }) {
   if (!intel) return null;
+  const fresh = freshnessMeta(intel.created_at);
   const sections = parseIntel(intel.content)
     .filter((s) => s.label !== 'FIABILITÉ GLOBALE'); // déjà en tag dans l'entête
   const head = sections.length && sections[0].label?.startsWith('MATCH') ? sections.shift() : null;
@@ -76,7 +85,8 @@ function IntelCard({ intel }) {
               fiabilité {intel.reliability}
             </span>
           )}
-          {freshness(intel.created_at)}
+          <span className={`tag ${fresh.stale ? 'amber' : 'ink'}`}>{fresh.stale ? 'à rafraîchir' : 'frais'}</span>
+          <span style={{ marginLeft: '.45rem' }}>{fresh.label}</span>
         </span>
       </h3>
       <div className="intel-body">
@@ -190,12 +200,18 @@ export default function MatchDetail({ id }) {
           <h3>Suggestions du pod <span className="note">{data.suggestions.length}</span></h3>
           {data.suggestions.length ? (
             <table>
-              <thead><tr><th>Issue</th><th className="num">Cote</th><th className="num">Edge</th><th className="num">Mise sugg.</th><th>Statut</th></tr></thead>
+              <thead><tr><th>Issue</th><th className="num">Cote</th><th className="num">P. est.</th><th className="num">P. marché</th><th className="num">Edge</th><th className="num">Mise</th><th>Statut</th></tr></thead>
               <tbody>
                 {data.suggestions.map((s) => (
                   <tr key={s.id}>
-                    <td>{OUTCOME_FR[s.outcome]} <span className="small muted">{s.rationale?.slice(0, 60)}</span></td>
-                    <td className="num">{s.best_price?.toFixed(2)}</td>
+                    <td>
+                      <b>{OUTCOME_FR[s.outcome]}</b>
+                      <div className="small muted">{s.agent} · {s.created_at?.slice(0, 16).replace('T', ' ')} UTC</div>
+                      {s.rationale && <div className="quant-rationale">{s.rationale}</div>}
+                    </td>
+                    <td className="num">{s.best_price?.toFixed(2)}<div className="small muted">{s.bookmaker}</div></td>
+                    <td className="num">{fmtPct(s.est_probability, 0)}</td>
+                    <td className="num">{fmtPct(s.implied_probability, 0)}</td>
                     <td className="num">{fmtPct(s.edge)}</td>
                     <td className="num">{fmtEur(s.suggested_stake)}</td>
                     <td><span className="tag ink">{s.status}</span></td>

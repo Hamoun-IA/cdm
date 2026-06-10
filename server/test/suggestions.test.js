@@ -92,6 +92,15 @@ test('take : transforme en pari lié, marque TAKEN, mise par défaut = suggéré
   assert.throws(() => takeSuggestion(db, s.id, {}), /déjà/);
 });
 
+test('take : refuse une suggestion si le match a commencé avant la prise', () => {
+  const db = freshDb();
+  const s = createSuggestion(db, { match_id: 1, outcome: 'home', est_probability: 0.55 });
+  db.prepare("UPDATE matches SET status = 'IN_PLAY' WHERE id = 1").run();
+  assert.throws(() => takeSuggestion(db, s.id, {}), /non prenable/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM bets').get().n, 0);
+  assert.equal(db.prepare('SELECT status FROM suggestions WHERE id = ?').get(s.id).status, 'OPEN');
+});
+
 test('expiration : suggestion OPEN sur match commencé → EXPIRED', () => {
   const db = freshDb();
   const s = createSuggestion(db, { match_id: 1, outcome: 'home', est_probability: 0.55 });

@@ -195,3 +195,22 @@ des jalons espacés dans le temps. Le découpage fonctionnel du GOAL est respect
   loopback à **bind tailnet** (100.123.18.2:18789) pour être joignable depuis
   le conteneur — tailnet uniquement, vérifié injoignable depuis l'IP publique,
   webhook refusant sans token (401).
+
+## Post-livraison — Revue intégrité betting/cotes (2026-06-11)
+
+- **Mapping Odds API durci** : l'appariement accepte toujours les événements dont
+  home/away sont inversés côté provider, mais remappe désormais les outcomes vers
+  l'ordre local du match avant stockage. Risque évité : cote d'une équipe stockée
+  sur l'autre issue et donc edge/Kelly faux.
+- **Garde serveur après kickoff** : `POST /api/bets` et la prise d'une suggestion
+  refusent désormais les matchs qui ne sont plus `SCHEDULED`/`TIMED`. Les voies UI
+  filtraient déjà, mais l'API devait porter la règle non contournable.
+- **Quota closing lines protégé** : migration `002_closing_attempts.sql` avec
+  journal par match. Une tentative closing est enregistrée même sans appariement
+  ou en erreur, ce qui évite des fetchs répétés The Odds API dans la même fenêtre
+  pré-kickoff.
+- Tests de non-régression ajoutés : mapping d'événement inversé, blocage pari
+  après kickoff, prise tardive de suggestion, journalisation closing.
+- **UX d'analyse renforcée** : la page match signale maintenant les fiches Scout
+  de plus de 24 h comme `à rafraîchir` et expose les suggestions Quant avec
+  probabilité estimée, probabilité marché, agent/date et raisonnement complet.

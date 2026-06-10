@@ -66,6 +66,15 @@ test('validations : cote ≤ 1, mise ≤ 0, match inexistant', () => {
   assert.throws(() => placeBet(db, { match_id: 99, outcome: 'home', odds: 2.0, stake: 4 }), /introuvable/);
 });
 
+test('garde serveur : impossible de placer un pari après kickoff', () => {
+  const db = freshDb();
+  db.prepare("UPDATE matches SET status = 'IN_PLAY' WHERE id = 1").run();
+  assert.throws(
+    () => placeBet(db, { match_id: 1, outcome: 'home', odds: 2.0, stake: 4 }),
+    /non ouvert aux paris/
+  );
+});
+
 test('settlement idempotent : un second passage ne crée rien', () => {
   const db = freshDb();
   placeBet(db, { match_id: 1, outcome: 'home', odds: 2.0, stake: 4 });

@@ -69,6 +69,23 @@ function buildMatchIndex(db) {
   return { index, norm };
 }
 
+export function matchEventToLocal(index, norm, ev) {
+  const directKey = `${norm(ev.home_team)}|${norm(ev.away_team)}`;
+  const reverseKey = `${norm(ev.away_team)}|${norm(ev.home_team)}`;
+  const direct = index.get(directKey);
+  if (direct) return { local: direct, reversed: false };
+  const reversed = index.get(reverseKey);
+  if (reversed) return { local: reversed, reversed: true };
+  return null;
+}
+
+export function localOutcomeFromEventOutcome(name, ev, norm, reversed = false) {
+  if (name === 'Draw') return 'draw';
+  if (norm(name) === norm(ev.home_team)) return reversed ? 'away' : 'home';
+  if (norm(name) === norm(ev.away_team)) return reversed ? 'home' : 'away';
+  return null;
+}
+
 /**
  * Fetch des cotes h2h (région eu). closing=true : réservé au job closing lines
  * (autorisé même sous le seuil dur) ; closingMatchIds : matchs du créneau à
@@ -106,24 +123,23 @@ export async function syncOdds(db, { closing = false, closingMatchIds = [], noti
     const horizon = new Date(Date.now() + 48 * 3600 * 1000).toISOString();
 
     let snapshots = 0, matched = 0;
+    const matchedLocalIds = new Set();
     const tx = db.transaction(() => {
       for (const ev of events) {
-        const local = index.get(`${norm(ev.home_team)}|${norm(ev.away_team)}`)
-          || index.get(`${norm(ev.away_team)}|${norm(ev.home_team)}`);
-        if (!local) continue;
-        const isClosing = closingSet.has(local.id) ? 1 : 0;
-        if (!isClosing && local.kickoff_utc > horizon) continue;
+        const resolved = matchEventToLocal(index, norm, ev);
+        if (!resolved) continue;
+        const isClosing = closingSet.has(resolved.local.id) ? 1 : 0;
+        if (!isClosing && resolved.local.kickoff_utc > horizon) continue;
         matched++;
+        matchedLocalIds.add(resolved.local.id);
         for (const bm of ev.bookmakers || []) {
           const market = (bm.markets || []).find((mk) => mk.key === 'h2h');
           if (!market) continue;
           for (const oc of market.outcomes || []) {
-            const outcome = oc.name === 'Draw' ? 'draw'
-              : norm(oc.name) === norm(ev.home_team) ? 'home'
-              : norm(oc.name) === norm(ev.away_team) ? 'away' : null;
+            const outcome = localOutcomeFromEventOutcome(oc.name, ev, norm, resolved.reversed);
             if (!outcome || !(oc.price > 1)) continue;
             ins.run({
-              match_id: local.id, bookmaker: bm.key, outcome,
+              match_id: resolved.local.id, bookmaker: bm.key, outcome,
               price: oc.price, taken_at: takenAt, is_closing: isClosing,
             });
             snapshots++;
@@ -139,7 +155,7 @@ export async function syncOdds(db, { closing = false, closingMatchIds = [], noti
     if (notify && quotaRemaining !== null && quotaRemaining < MIN_CREDITS_ALERT) {
       notify(`🔧 <b>Quota The Odds API bas</b> : ${quotaRemaining} crédits restants ce mois.`).catch(() => {});
     }
-    return { snapshots, matched, quotaRemaining };
+    return { snapshots, matched, quotaRemaining, matchedLocalIds: [...matchedLocalIds] };
   } catch (e) {
     logSync(db, closing ? 'closing' : 'odds', 'ERROR', e.message, e.quotaRemaining ?? null);
     return { error: e.message };

@@ -323,6 +323,13 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
 .intel-txt p:last-child { margin-bottom: 0; }
 .intel-sec.signal { background: var(--green-bg); border-left: 3px solid var(--green); }
 .intel-sec.signal .intel-lbl, .intel-sec.signal .intel-txt { color: var(--ink); }
+.quant-rationale {
+  margin-top: .22rem;
+  max-width: 30rem;
+  color: var(--ink-mid);
+  line-height: 1.4;
+  white-space: normal;
+}
 @media (max-width: 640px) {
   .intel-sec { grid-template-columns: 1fr; gap: .15rem; }
 }

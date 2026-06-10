@@ -24,6 +24,9 @@ export function placeBet(db, input) {
   if (match_id != null) {
     const m = db.prepare('SELECT id, status FROM matches WHERE id = ?').get(match_id);
     if (!m) throw httpError(404, `Match ${match_id} introuvable.`);
+    if (!['SCHEDULED', 'TIMED'].includes(m.status)) {
+      throw httpError(409, `Match ${match_id} non ouvert aux paris (statut ${m.status}).`);
+    }
   }
 
   ensureInit(db);
