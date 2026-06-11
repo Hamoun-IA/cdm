@@ -133,30 +133,44 @@ function IntelCard({ intel }) {
 const ANALYZE_TIMEOUT_MS = 5 * 60 * 1000;
 
 function Timeline({ events }) {
+  const [open, setOpen] = useState(false);
   if (!events?.length) return null;
   return (
     <div className="card timeline-card" style={{ marginBottom: '.9rem' }}>
-      <h3>Timeline match <span className="note">{events.length}</span></h3>
-      <div className="timeline">
-        {events.slice(0, 12).map((e, i) => (
-          <div key={`${e.type}-${e.at}-${i}`} className={`timeline-item tl-${e.type}`}>
-            <div className="timeline-time num">{e.at?.slice(5, 16).replace('T', ' ')}</div>
-            <div className="timeline-dot" />
-            <div className="timeline-body">
-              <div>
-                <span className="timeline-kind">{TIMELINE_TYPE_FR[e.type] || e.type}</span>
-                <b>{e.title}</b>
-              </div>
-              {e.detail && <div className="small muted">{e.detail}</div>}
-              {e.meta?.reasons?.length ? (
-                <div className="timeline-tags">
-                  {e.meta.reasons.map((r) => <span key={r} className="tag ink">{REASONS_FR[r] || r}</span>)}
+      <button
+        type="button"
+        className="timeline-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span>Timeline match</span>
+        <span className="timeline-toggle-meta">
+          <span className="note">{events.length} événements</span>
+          <span className={`chevron${open ? ' open' : ''}`}>v</span>
+        </span>
+      </button>
+      {open && (
+        <div className="timeline">
+          {events.slice(0, 12).map((e, i) => (
+            <div key={`${e.type}-${e.at}-${i}`} className={`timeline-item tl-${e.type}`}>
+              <div className="timeline-time num">{e.at?.slice(5, 16).replace('T', ' ')}</div>
+              <div className="timeline-dot" />
+              <div className="timeline-body">
+                <div>
+                  <span className="timeline-kind">{TIMELINE_TYPE_FR[e.type] || e.type}</span>
+                  <b>{e.title}</b>
                 </div>
-              ) : null}
+                {e.detail && <div className="small muted">{e.detail}</div>}
+                {e.meta?.reasons?.length ? (
+                  <div className="timeline-tags">
+                    {e.meta.reasons.map((r) => <span key={r} className="tag ink">{REASONS_FR[r] || r}</span>)}
+                  </div>
+                ) : null}
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

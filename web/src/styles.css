@@ -328,6 +328,47 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
 }
 
 /* ── Timeline match ───────────────────────────────────── */
+.timeline-toggle {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-mid);
+  margin: 0;
+  padding: .5rem .75rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: .75rem;
+  font-family: var(--display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+.timeline-toggle:hover { color: var(--ink); }
+.timeline-toggle-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+}
+.timeline-toggle .note {
+  font-family: var(--body);
+  font-size: .7rem;
+  color: var(--ink-soft);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.chevron {
+  display: inline-block;
+  color: var(--ink-soft);
+  font-family: var(--body);
+  font-size: .85rem;
+  line-height: 1;
+  transition: transform .12s ease;
+}
+.chevron.open { transform: rotate(180deg); }
 .timeline { display: grid; padding: .2rem .75rem .75rem; }
 .timeline-item {
   display: grid;
