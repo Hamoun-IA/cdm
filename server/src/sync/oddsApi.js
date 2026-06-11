@@ -1,5 +1,5 @@
 // Sync The Odds API v4 (PLAN §4.3) — budget strict 500 crédits/mois.
-// - 1 fetch/jour 08h00 Brussels (h2h, région eu) pour J et J+1 → ~1 crédit.
+// - 1 fetch/jour 08h00 Brussels (h2h + totals, région eu) pour J et J+1 → ~1 crédit.
 // - Closing lines : fetch groupé par créneau 10 min avant kickoff (is_closing=1).
 // - Compteur via header x-requests-remaining persisté dans sync_log.
 // - Refus de tout fetch (hors closing) si < 20 crédits ; alerte Telegram < 100.
@@ -86,8 +86,15 @@ export function localOutcomeFromEventOutcome(name, ev, norm, reversed = false) {
   return null;
 }
 
+export function totalOutcomeFromApi(oc) {
+  const side = String(oc?.name || '').toLowerCase();
+  const point = Number(oc?.point);
+  if (!['over', 'under'].includes(side) || !Number.isFinite(point)) return null;
+  return { outcome: `${side}_${point}`, point };
+}
+
 /**
- * Fetch des cotes h2h (région eu). closing=true : réservé au job closing lines
+ * Fetch des cotes h2h + totals (région eu). closing=true : réservé au job closing lines
  * (autorisé même sous le seuil dur) ; closingMatchIds : matchs du créneau à
  * marquer is_closing=1.
  */
@@ -102,7 +109,7 @@ export async function syncOdds(db, { closing = false, closingMatchIds = [], noti
 
     const sportKey = await discoverSportKey(db);
     const res = await fetch(
-      `${BASE}/sports/${sportKey}/odds?apiKey=${config.oddsApiKey}&regions=eu&markets=h2h&oddsFormat=decimal`
+      `${BASE}/sports/${sportKey}/odds?apiKey=${config.oddsApiKey}&regions=eu&markets=h2h,totals&oddsFormat=decimal`
     );
     const remaining = parseInt(res.headers.get('x-requests-remaining') ?? '', 10);
     const quotaRemaining = Number.isFinite(remaining) ? remaining : null;
@@ -114,8 +121,8 @@ export async function syncOdds(db, { closing = false, closingMatchIds = [], noti
     const { index, norm } = buildMatchIndex(db);
     const closingSet = new Set(closingMatchIds);
     const ins = db.prepare(`
-      INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at, is_closing)
-      VALUES (@match_id, @bookmaker, 'h2h', @outcome, @price, @taken_at, @is_closing)
+      INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, point, price, taken_at, is_closing)
+      VALUES (@match_id, @bookmaker, @market, @outcome, @point, @price, @taken_at, @is_closing)
     `);
     const takenAt = nowUtcIso();
     // Fenêtre J/J+1 (48h) : on ne stocke pas les snapshots au-delà (budget lisible),
@@ -133,13 +140,23 @@ export async function syncOdds(db, { closing = false, closingMatchIds = [], noti
         matched++;
         matchedLocalIds.add(resolved.local.id);
         for (const bm of ev.bookmakers || []) {
-          const market = (bm.markets || []).find((mk) => mk.key === 'h2h');
-          if (!market) continue;
-          for (const oc of market.outcomes || []) {
+          const h2h = (bm.markets || []).find((mk) => mk.key === 'h2h');
+          for (const oc of h2h?.outcomes || []) {
             const outcome = localOutcomeFromEventOutcome(oc.name, ev, norm, resolved.reversed);
             if (!outcome || !(oc.price > 1)) continue;
             ins.run({
-              match_id: resolved.local.id, bookmaker: bm.key, outcome,
+              match_id: resolved.local.id, bookmaker: bm.key, market: 'h2h', outcome, point: null,
+              price: oc.price, taken_at: takenAt, is_closing: isClosing,
+            });
+            snapshots++;
+          }
+          const totals = (bm.markets || []).find((mk) => mk.key === 'totals');
+          for (const oc of totals?.outcomes || []) {
+            const total = totalOutcomeFromApi(oc);
+            if (!total || !(oc.price > 1)) continue;
+            ins.run({
+              match_id: resolved.local.id, bookmaker: bm.key, market: 'totals',
+              outcome: total.outcome, point: total.point,
               price: oc.price, taken_at: takenAt, is_closing: isClosing,
             });
             snapshots++;

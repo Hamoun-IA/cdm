@@ -169,6 +169,67 @@ function MatchOpinion({ opinion }) {
   );
 }
 
+function pct0(x) {
+  return x == null ? '—' : `${Math.round(Number(x) * 100)} %`;
+}
+
+function CodexOpinion({ opinion, match }) {
+  if (!opinion) return null;
+  const probs = opinion.probabilities || {};
+  const fair = opinion.fair_odds || {};
+  const h2h = [
+    ['home', match.home_display],
+    ['draw', 'Nul'],
+    ['away', match.away_display],
+  ];
+  return (
+    <div className="card codex-card">
+      <div className="codex-head">
+        <div>
+          <div className="codex-kicker">Avis Codex</div>
+          <h3>{opinion.headline}</h3>
+        </div>
+        <div className="confidence-chip codex-confidence">
+          <span className="num">{opinion.confidence_score}</span>
+          <span>confiance</span>
+        </div>
+      </div>
+      <div className="codex-body">
+        <p className="codex-summary">{opinion.summary}</p>
+        <div className="codex-strip">
+          {h2h.map(([key, label]) => (
+            <div key={key} className="codex-prob">
+              <span>{label}</span>
+              <b>{pct0(probs[key])}</b>
+              <em>cote {fair[key]?.toFixed ? fair[key].toFixed(2) : fair[key] || '—'}</em>
+            </div>
+          ))}
+        </div>
+        {opinion.totals?.length ? (
+          <div className="codex-totals">
+            {opinion.totals.map((line) => (
+              <div key={line.line} className="codex-total-line">
+                <span>O/U {line.line}{line.synthetic ? ' · modèle' : ''}</span>
+                <b>Over {pct0(line.probs?.over)} · Under {pct0(line.probs?.under)}</b>
+                <em>cotes {line.fair_odds?.over?.toFixed ? line.fair_odds.over.toFixed(2) : line.fair_odds?.over || '—'} / {line.fair_odds?.under?.toFixed ? line.fair_odds.under.toFixed(2) : line.fair_odds?.under || '—'}</em>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <div className="codex-forced">
+          <span>Si obligation de se positionner</span>
+          <b>{opinion.forced_pick_label}</b>
+          <em>{opinion.forced_pick_market}</em>
+        </div>
+        <div className="codex-meta">
+          <span>{opinion.change_summary}</span>
+          <span>{opinion.generated_at?.slice(0, 16).replace('T', ' ')} UTC · {opinion.model_version}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const ANALYZE_TIMEOUT_MS = 5 * 60 * 1000;
 
 function Timeline({ events }) {
@@ -456,6 +517,7 @@ export default function MatchDetail({ id }) {
 
   // Analyse à la demande : 202 immédiat, puis on guette la nouvelle fiche intel.
   const [analyzing, setAnalyzing] = useState(null); // null | 'pending' | message d'erreur
+  const [codexing, setCodexing] = useState(null); // null | 'pending' | message d'erreur
   const [preparing, setPreparing] = useState(false);
   const [preparation, setPreparation] = useState(null);
   const baseline = useRef(null); // created_at de la fiche au moment de la demande
@@ -502,6 +564,17 @@ export default function MatchDetail({ id }) {
     }
   };
 
+  const requestCodexOpinion = async () => {
+    setCodexing('pending');
+    try {
+      await api(`/matches/${id}/codex-opinion`, { method: 'POST' });
+      setCodexing(null);
+      reload();
+    } catch (e) {
+      setCodexing(e.message);
+    }
+  };
+
   if (loading) return <div className="loading">Chargement…</div>;
   if (!data?.match) return <div className="errbox">Match introuvable.</div>;
   const m = data.match;
@@ -534,6 +607,8 @@ export default function MatchDetail({ id }) {
 
       <MatchOpinion opinion={data.opinion} />
 
+      <CodexOpinion opinion={data.codex_opinion} match={m} />
+
       <Timeline events={data.timeline || []} />
 
       <div className="analyze-bar">
@@ -543,8 +618,12 @@ export default function MatchDetail({ id }) {
         <button className="ghost" disabled={analyzing === 'pending'} onClick={requestAnalysis}>
           {analyzing === 'pending' ? '🔭 Analyse en cours…' : '🔭 Analyser maintenant'}
         </button>
+        <button className="ghost" disabled={codexing === 'pending'} onClick={requestCodexOpinion}>
+          {codexing === 'pending' ? 'Avis Codex…' : 'Avis Codex'}
+        </button>
         {analyzing === 'pending' && <span className="small muted">le Scout enquête, la fiche apparaîtra ici (~2 min)</span>}
         {analyzing && analyzing !== 'pending' && <span className="small" style={{ color: 'var(--brick)' }}>{analyzing}</span>}
+        {codexing && codexing !== 'pending' && <span className="small" style={{ color: 'var(--brick)' }}>{codexing}</span>}
       </div>
       {preparation?.error && <div className="errbox" style={{ marginBottom: '.7rem' }}>{preparation.error}</div>}
       {preparation?.checklist?.length ? (

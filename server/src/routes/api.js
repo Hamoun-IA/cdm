@@ -23,6 +23,7 @@ import { listSourceProfiles, saveSourceProfile, updateSourceProfile } from '../s
 import { prepareMatch } from '../services/prepareService.js';
 import { matchdayMorning } from '../services/matchdayMorningService.js';
 import { buildMatchOpinion } from '../services/matchOpinionService.js';
+import { generateCodexOpinion, latestCodexOpinion } from '../services/codexOpinionService.js';
 
 const MATCH_SELECT = `
   SELECT m.*, th.name AS home_name, th.fifa_code AS home_code, th.flag_emoji AS home_flag,
@@ -145,6 +146,7 @@ export function apiRouter(db, { notify = null } = {}) {
       decision_postmortems,
       latest_scorecard,
       scorecards,
+      codex_opinion: latestCodexOpinion(db, row.id),
       timeline: matchTimeline(db, row.id),
     });
   });
@@ -170,6 +172,12 @@ export function apiRouter(db, { notify = null } = {}) {
   r.post('/matches/:id/prepare', (req, res, next) => {
     try {
       res.json({ preparation: prepareMatch(db, Number(req.params.id)) });
+    } catch (e) { next(e); }
+  });
+
+  r.post('/matches/:id/codex-opinion', (req, res, next) => {
+    try {
+      res.status(201).json({ codex_opinion: generateCodexOpinion(db, Number(req.params.id)) });
     } catch (e) { next(e); }
   });
 

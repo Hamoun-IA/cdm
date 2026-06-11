@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { matchEventToLocal, localOutcomeFromEventOutcome } from '../src/sync/oddsApi.js';
+import { matchEventToLocal, localOutcomeFromEventOutcome, totalOutcomeFromApi } from '../src/sync/oddsApi.js';
 
 const norm = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z]/g, '');
 
@@ -26,4 +26,11 @@ test('The Odds API : event inversé → outcomes remappés vers le match local',
   assert.equal(localOutcomeFromEventOutcome('Belgium', ev, norm, resolved.reversed), 'home');
   assert.equal(localOutcomeFromEventOutcome('Egypt', ev, norm, resolved.reversed), 'away');
   assert.equal(localOutcomeFromEventOutcome('Draw', ev, norm, resolved.reversed), 'draw');
+});
+
+test('The Odds API : totals Over/Under → outcome local avec ligne', () => {
+  assert.deepEqual(totalOutcomeFromApi({ name: 'Over', point: 2.5 }), { outcome: 'over_2.5', point: 2.5 });
+  assert.deepEqual(totalOutcomeFromApi({ name: 'Under', point: 3.5 }), { outcome: 'under_3.5', point: 3.5 });
+  assert.equal(totalOutcomeFromApi({ name: 'Exactly', point: 2.5 }), null);
+  assert.equal(totalOutcomeFromApi({ name: 'Over' }), null);
 });
