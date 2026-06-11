@@ -23,13 +23,19 @@ function BankrollCurve({ history }) {
   );
 }
 
-function EncodeForm({ matches, onDone, prefill }) {
+function EncodeForm({ matches, risk, onDone, prefill }) {
   const [matchId, setMatchId] = useState('');
   const [outcome, setOutcome] = useState('home');
   const [odds, setOdds] = useState('');
   const [stake, setStake] = useState('');
   const [bookmaker, setBookmaker] = useState('');
+  const [notes, setNotes] = useState('');
   const [msg, setMsg] = useState(null);
+  const selectedMatch = matches.find((m) => String(m.id) === String(matchId));
+  const nStake = Number(String(stake).replace(',', '.'));
+  const maxStake = risk?.balance != null ? risk.balance * risk.thresholds.max_stake_pct : null;
+  const stakePct = risk?.balance > 0 && nStake > 0 ? nStake / risk.balance : null;
+  const exposureAfter = risk && nStake > 0 ? risk.open_exposure + nStake : null;
 
   // « Corriger » un pari : l'ancien est annulé (VOID), ses valeurs arrivent ici.
   React.useEffect(() => {
@@ -39,6 +45,7 @@ function EncodeForm({ matches, onDone, prefill }) {
     setOdds(prefill.odds != null ? String(prefill.odds) : '');
     setStake(prefill.stake != null ? String(prefill.stake) : '');
     setBookmaker(prefill.bookmaker || '');
+    setNotes(prefill.notes || '');
     setMsg({ ok: true, text: `Pari #${prefill.id} annulé (mise remboursée) — corrige puis ré-encode.` });
   }, [prefill]);
 
@@ -48,10 +55,18 @@ function EncodeForm({ matches, onDone, prefill }) {
     try {
       const { bet, warnings } = await api('/bets', {
         method: 'POST',
-        body: { match_id: Number(matchId), outcome, odds: Number(odds.replace(',', '.')), stake: Number(stake.replace(',', '.')), bookmaker: bookmaker || null, source: 'web' },
+        body: {
+          match_id: Number(matchId),
+          outcome,
+          odds: Number(odds.replace(',', '.')),
+          stake: Number(stake.replace(',', '.')),
+          bookmaker: bookmaker || null,
+          notes: notes || null,
+          source: 'web',
+        },
       });
       setMsg({ ok: true, text: `Pari #${bet.id} enregistré.`, warnings });
-      setOdds(''); setStake('');
+      setOdds(''); setStake(''); setNotes('');
       onDone();
     } catch (err) {
       setMsg({ ok: false, text: err.message });
@@ -71,15 +86,24 @@ function EncodeForm({ matches, onDone, prefill }) {
           ))}
         </select>
         <select value={outcome} onChange={(e) => setOutcome(e.target.value)}>
-          <option value="home">1 (domicile)</option>
+          <option value="home">1 {selectedMatch ? `(${selectedMatch.home_display})` : '(domicile)'}</option>
           <option value="draw">N (nul)</option>
-          <option value="away">2 (extérieur)</option>
+          <option value="away">2 {selectedMatch ? `(${selectedMatch.away_display})` : '(extérieur)'}</option>
         </select>
         <input required placeholder="Cote" value={odds} onChange={(e) => setOdds(e.target.value)} style={{ width: 70 }} inputMode="decimal" />
         <input required placeholder="Mise €" value={stake} onChange={(e) => setStake(e.target.value)} style={{ width: 70 }} inputMode="decimal" />
         <input placeholder="Bookmaker" value={bookmaker} onChange={(e) => setBookmaker(e.target.value)} style={{ width: 110 }} />
+        <input placeholder="Note" value={notes} onChange={(e) => setNotes(e.target.value)} style={{ minWidth: 160 }} />
         <button className="primary" type="submit">Encoder</button>
       </form>
+      {risk && nStake > 0 && (
+        <div className="bet-preview">
+          <span>Mise : <b className="num">{fmtPct(stakePct)}</b> bankroll</span>
+          <span>Limite indicative : <b className="num">{fmtEur(maxStake)}</b></span>
+          <span>Exposition après encodage : <b className="num">{fmtEur(exposureAfter)}</b></span>
+          {maxStake != null && nStake > maxStake && <span className="tag amber">au-dessus de la limite indicative</span>}
+        </div>
+      )}
       {msg && (
         <div style={{ padding: '0 .7rem .6rem' }}>
           <div className={msg.ok ? 'okbox' : 'errbox'}>{msg.text}</div>
@@ -133,6 +157,7 @@ export default function Paris() {
   const { data: betsData, reload: reloadBets } = useApi('/bets');
   const { data: sugData, reload: reloadSug } = useApi('/suggestions?status=OPEN');
   const { data: upData } = useApi('/matches');
+  const { data: riskData, reload: reloadRisk } = useApi('/risk');
   const [statusFilter, setStatusFilter] = useState('');
 
   const upcoming = useMemo(
@@ -140,7 +165,7 @@ export default function Paris() {
     [upData]
   );
   const bets = (betsData?.bets || []).filter((b) => !statusFilter || b.status === statusFilter);
-  const reloadAll = () => { reloadBk(); reloadBets(); reloadSug(); };
+  const reloadAll = () => { reloadBk(); reloadBets(); reloadSug(); reloadRisk(); };
   const [prefill, setPrefill] = useState(null);
   const [rowErr, setRowErr] = useState(null);
 
@@ -181,7 +206,7 @@ export default function Paris() {
         </>
       )}
 
-      <EncodeForm matches={upcoming} onDone={reloadAll} prefill={prefill} />
+      <EncodeForm matches={upcoming} risk={riskData} onDone={reloadAll} prefill={prefill} />
 
       <h2 className="view-title" style={{ marginTop: '1.4rem' }}>Suggestions ouvertes
         <span className="note">mise Kelly pré-remplie, modifiable — le pod suggère, toi seul décides</span>

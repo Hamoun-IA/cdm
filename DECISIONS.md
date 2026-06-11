@@ -298,3 +298,12 @@ des jalons espacés dans le temps. Le découpage fonctionnel du GOAL est respect
   les matchs J/J+1, les actions à décider et le dashboard risques.
 - Ajout de la vue `Matin`, premier onglet de navigation, avec KPI du jour,
   checklist de revue et priorités classées par urgence opérationnelle.
+
+## Roadmap cockpit — Point 11 formulaire de pari (2026-06-11)
+
+- Le formulaire d'encodage affiche maintenant l'équipe associée à chaque issue
+  `1/N/2`, accepte une note libre et montre un aperçu du risque avant
+  enregistrement : part de bankroll, limite indicative et exposition après
+  encodage.
+- Ce contrôle reste informatif : l'encodage manuel conserve les garde-fous
+  serveur existants et les avertissements, sans blocage arbitraire côté UI.

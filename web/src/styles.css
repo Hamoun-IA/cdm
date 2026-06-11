@@ -249,6 +249,18 @@ button.ghost {
 }
 button.ghost:hover { border-color: var(--green); color: var(--green); }
 form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; padding: .65rem .75rem; }
+.bet-preview {
+  margin: -.25rem .75rem .7rem;
+  padding: .45rem .55rem;
+  display: flex;
+  gap: .65rem;
+  flex-wrap: wrap;
+  align-items: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  color: var(--ink-mid);
+  background: rgba(255,255,255,.02);
+}
 .warnbox { background: var(--amber-bg); border-left: 3px solid var(--amber); border-radius: 0 6px 6px 0; padding: .45rem .65rem; font-size: .78rem; margin: .5rem 0; color: var(--ink); }
 .okbox { background: var(--green-bg); border-left: 3px solid var(--green); border-radius: 0 6px 6px 0; padding: .45rem .65rem; font-size: .78rem; margin: .5rem 0; color: var(--ink); }
 .errbox { background: var(--brick-bg); border-left: 3px solid var(--brick); border-radius: 0 6px 6px 0; padding: .45rem .65rem; font-size: .78rem; margin: .5rem 0; color: var(--ink); }
