@@ -22,6 +22,7 @@ import { riskDashboard } from '../services/riskService.js';
 import { listSourceProfiles, saveSourceProfile, updateSourceProfile } from '../services/sourceProfilesService.js';
 import { prepareMatch } from '../services/prepareService.js';
 import { matchdayMorning } from '../services/matchdayMorningService.js';
+import { buildMatchOpinion } from '../services/matchOpinionService.js';
 
 const MATCH_SELECT = `
   SELECT m.*, th.name AS home_name, th.fifa_code AS home_code, th.flag_emoji AS home_flag,
@@ -119,18 +120,30 @@ export function apiRouter(db, { notify = null } = {}) {
     const decisions = listDecisions(db, { matchId: row.id });
     const decision_postmortems = listDecisionPostmortems(db, { matchId: row.id });
     const scorecards = listScorecards(db, row.id);
+    const intel = latestIntel(db, row.id);
+    const latest_decision = latestDecision(db, row.id);
+    const latest_scorecard = latestScorecard(db, row.id);
     const odds = db.prepare(`
       SELECT bookmaker, market, outcome, price, point, taken_at, is_closing
       FROM odds_snapshots WHERE match_id = ? ORDER BY taken_at DESC LIMIT 100
     `).all(row.id);
     const stats = db.prepare('SELECT * FROM match_stats WHERE match_id = ?').all(row.id);
+    const match = decorateMatch(db, row);
     res.json({
-      match: decorateMatch(db, row), bets, suggestions, odds_snapshots: odds, stats,
-      intel: latestIntel(db, row.id),
-      latest_decision: latestDecision(db, row.id),
+      match, bets, suggestions, odds_snapshots: odds, stats,
+      opinion: buildMatchOpinion({
+        match,
+        intel,
+        latestDecision: latest_decision,
+        latestScorecard: latest_scorecard,
+        suggestions,
+        oddsSnapshots: odds,
+      }),
+      intel,
+      latest_decision,
       decisions,
       decision_postmortems,
-      latest_scorecard: latestScorecard(db, row.id),
+      latest_scorecard,
       scorecards,
       timeline: matchTimeline(db, row.id),
     });

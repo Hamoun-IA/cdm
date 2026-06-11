@@ -130,6 +130,45 @@ function IntelCard({ intel }) {
   );
 }
 
+function MatchOpinion({ opinion }) {
+  if (!opinion) return null;
+  return (
+    <div className="card opinion-card">
+      <div className="opinion-head">
+        <div>
+          <div className="opinion-kicker">Avis des agents</div>
+          <h3>{opinion.headline}</h3>
+        </div>
+        <div className="confidence-chip">
+          <span className="num">{opinion.confidence_score}</span>
+          <span>{opinion.confidence_label}</span>
+        </div>
+      </div>
+      <div className="opinion-body">
+        <p className="opinion-summary">{opinion.summary}</p>
+        <p className="opinion-agent">{opinion.agent_view}</p>
+        {opinion.caveats?.length ? (
+          <div className="opinion-row">
+            <span className="opinion-label">À surveiller</span>
+            <div className="opinion-tags">
+              {opinion.caveats.map((c) => <span key={c} className="opinion-pill caution">{c}</span>)}
+            </div>
+          </div>
+        ) : null}
+        {opinion.basis?.length ? (
+          <div className="opinion-row">
+            <span className="opinion-label">Appuis</span>
+            <div className="opinion-tags">
+              {opinion.basis.map((b) => <span key={b} className="opinion-pill">{b}</span>)}
+            </div>
+          </div>
+        ) : null}
+        <div className="opinion-disclaimer">{opinion.disclaimer}</div>
+      </div>
+    </div>
+  );
+}
+
 const ANALYZE_TIMEOUT_MS = 5 * 60 * 1000;
 
 function Timeline({ events }) {
@@ -492,6 +531,8 @@ export default function MatchDetail({ id }) {
         </div>
         <div className="tm"><Flag emoji={m.away_flag} /> {m.away_display}</div>
       </div>
+
+      <MatchOpinion opinion={data.opinion} />
 
       <Timeline events={data.timeline || []} />
 

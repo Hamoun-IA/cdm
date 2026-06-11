@@ -280,6 +280,115 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
 .scoreboard .sub { font-size: .7rem; color: var(--strip-soft); text-align: center; text-transform: uppercase; letter-spacing: .1em; }
 .sparkline { width: 100%; height: 46px; }
 
+.opinion-card {
+  margin-bottom: .9rem;
+  border-left: 3px solid var(--green);
+}
+.opinion-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+  padding: .7rem .8rem .55rem;
+  border-bottom: 1px solid var(--line);
+}
+.opinion-kicker {
+  margin-bottom: .12rem;
+  color: var(--green);
+  font-size: .66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+}
+.opinion-head h3 {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 1.45rem;
+  line-height: 1.05;
+  letter-spacing: .03em;
+}
+.confidence-chip {
+  min-width: 5rem;
+  padding: .35rem .5rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--card-2);
+  text-align: right;
+}
+.confidence-chip .num {
+  display: block;
+  color: var(--green);
+  font-family: var(--display);
+  font-size: 1.65rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.confidence-chip span:last-child {
+  display: block;
+  color: var(--ink-soft);
+  font-size: .64rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.opinion-body {
+  display: grid;
+  gap: .55rem;
+  padding: .7rem .8rem .75rem;
+}
+.opinion-summary {
+  margin: 0;
+  color: var(--ink);
+  font-size: .95rem;
+  line-height: 1.55;
+}
+.opinion-agent {
+  margin: 0;
+  color: var(--ink-mid);
+  line-height: 1.45;
+}
+.opinion-row {
+  display: grid;
+  grid-template-columns: 7.4rem 1fr;
+  gap: .75rem;
+  align-items: start;
+}
+.opinion-label {
+  color: var(--ink-soft);
+  font-size: .66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  padding-top: .12rem;
+}
+.opinion-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+}
+.opinion-pill {
+  display: inline-block;
+  max-width: 100%;
+  padding: .2rem .5rem;
+  border-radius: 5px;
+  background: var(--card-2);
+  color: var(--ink-mid);
+  font-size: .74rem;
+  line-height: 1.35;
+}
+.opinion-pill.caution {
+  background: var(--amber-bg);
+  color: var(--ink);
+}
+.opinion-disclaimer {
+  color: var(--ink-soft);
+  font-size: .72rem;
+  border-top: 1px solid var(--line-soft);
+  padding-top: .55rem;
+}
+
 .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: .9rem; }
 
 /* ── Bracket ──────────────────────────────────────────── */
@@ -312,6 +421,9 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
   main { padding: .8rem .8rem 2.5rem; }
   .scoreboard .big { font-size: 2.1rem; min-width: 4.5rem; }
   .scoreboard .tm { font-size: 1.1rem; }
+  .opinion-head { grid-template-columns: 1fr; flex-direction: column; }
+  .confidence-chip { text-align: left; }
+  .opinion-row { grid-template-columns: 1fr; gap: .25rem; }
 }
 
 .analyze-bar { display: flex; align-items: center; gap: .7rem; margin-bottom: .6rem; flex-wrap: wrap; }
