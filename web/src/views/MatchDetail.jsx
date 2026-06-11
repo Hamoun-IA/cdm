@@ -481,10 +481,6 @@ export default function MatchDetail({ id }) {
 
       <Timeline events={data.timeline || []} />
 
-      <DecisionCard matchId={id} latest={data.latest_decision} history={data.decisions || []} onSaved={reload} />
-      <Scorecard matchId={id} latest={data.latest_scorecard} onSaved={reload} />
-      <DecisionPostmortems decisions={data.decisions || []} postmortems={data.decision_postmortems || []} onSaved={reload} />
-
       <div className="analyze-bar">
         <button className="primary" disabled={preparing} onClick={requestPrepare}>
           {preparing ? 'Préparation…' : 'Préparer ce match'}
@@ -576,6 +572,10 @@ export default function MatchDetail({ id }) {
           ) : <p className="small muted" style={{ padding: '0 .7rem .6rem' }}>Aucun pari sur ce match — encode-le sur Telegram ou via la vue Paris.</p>}
         </div>
       </div>
+
+      <DecisionCard matchId={id} latest={data.latest_decision} history={data.decisions || []} onSaved={reload} />
+      <Scorecard matchId={id} latest={data.latest_scorecard} onSaved={reload} />
+      <DecisionPostmortems decisions={data.decisions || []} postmortems={data.decision_postmortems || []} onSaved={reload} />
     </>
   );
 }
