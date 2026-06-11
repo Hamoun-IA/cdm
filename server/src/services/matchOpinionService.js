@@ -138,7 +138,6 @@ export function buildMatchOpinion({
   } else if (favorite) {
     basis.push('le marché indicatif dessine un match assez ouvert');
   }
-  if (signal) basis.push(`le Scout remonte ce signal : ${signal}`);
   if (impact) basis.push(impact);
   if (latestScorecard?.tactical_edge >= 4) basis.push('la scorecard signale un avantage tactique marqué');
   if (latestScorecard?.source_reliability >= 4 || intel?.reliability === 'haute') basis.push('les sources disponibles sont jugées plutôt fiables');
@@ -159,8 +158,11 @@ export function buildMatchOpinion({
     ? `${favorite.name} aborde ce match avec un léger ascendant dans la lecture actuelle.`
     : `${home} - ${away} reste un match à lire avec retenue.`;
   const basisText = basis.length
-    ? ` Ce sentiment vient surtout de ${basis.slice(0, 3).join(', ')}.`
+    ? ` Ce sentiment s’appuie surtout sur ces éléments : ${basis.slice(0, 3).join(', ')}.`
     : ' Les agents manquent encore de matière solide pour aller au-delà d’une première impression.';
+  const signalText = signal
+    ? ` Le point Scout à garder en tête : ${signal}.`
+    : '';
   const caveatText = caveats.length
     ? ` En face, le principal point de vigilance concerne ${caveats.slice(0, 2).join(' ; ')}.`
     : ` ${favorite?.side === 'home' ? away : home} garde assez d’inconnues pour empêcher une lecture trop tranchée.`;
@@ -198,7 +200,7 @@ export function buildMatchOpinion({
 
   return {
     headline,
-    summary: `${lead}${basisText}${caveatText}`,
+    summary: `${lead}${basisText}${signalText}${caveatText}`,
     agent_view: `S’ils devaient se positionner, ${agentView}.${leanText}`,
     confidence_score: confidence,
     confidence_label: confidenceLabel(confidence),
