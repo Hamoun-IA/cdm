@@ -291,3 +291,10 @@ des jalons espacés dans le temps. Le découpage fonctionnel du GOAL est respect
 - La fiche match affiche un bouton `Préparer ce match` et une checklist
   décision/scorecard/Scout/cotes. Cette action cadre l'analyse mais ne crée
   jamais de pari.
+
+## Roadmap cockpit — Point 10 matchday morning (2026-06-11)
+
+- Ajout de `GET /api/matchday/morning`, synthèse de revue matinale basée sur
+  les matchs J/J+1, les actions à décider et le dashboard risques.
+- Ajout de la vue `Matin`, premier onglet de navigation, avec KPI du jour,
+  checklist de revue et priorités classées par urgence opérationnelle.

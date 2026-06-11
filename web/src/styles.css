@@ -588,6 +588,44 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
   .source-form { grid-template-columns: 1fr; }
 }
 
+/* ── Matchday morning ─────────────────────────────────── */
+.morning-card { margin-bottom: .9rem; }
+.morning-checklist {
+  padding: .65rem .75rem;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(140px, 1fr));
+  gap: .5rem;
+}
+.morning-check {
+  min-height: 4.2rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  padding: .55rem;
+  display: grid;
+  align-content: start;
+  gap: .4rem;
+  background: rgba(255,255,255,.02);
+}
+.morning-check.todo { border-color: rgba(214,166,75,.45); background: var(--amber-bg); }
+.morning-priorities { display: grid; }
+.morning-priority {
+  display: grid;
+  grid-template-columns: 5.2rem 1fr auto;
+  gap: .75rem;
+  padding: .7rem .75rem;
+  color: inherit;
+  border-top: 1px solid var(--line-soft);
+}
+.morning-priority:first-child { border-top: none; }
+.morning-priority:hover { background: rgba(255,255,255,.03); text-decoration: none; }
+@media (max-width: 900px) {
+  .morning-checklist { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+}
+@media (max-width: 720px) {
+  .morning-priority { grid-template-columns: 1fr; }
+  .morning-checklist { grid-template-columns: 1fr; }
+}
+
 /* ── À décider ────────────────────────────────────────── */
 .decision-board { display: grid; gap: .55rem; }
 .decision-match {

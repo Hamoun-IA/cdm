@@ -16,6 +16,7 @@ import Bracket from './views/Bracket.jsx';
 import ADecider from './views/ADecider.jsx';
 import Risques from './views/Risques.jsx';
 import Sources from './views/Sources.jsx';
+import Matin from './views/Matin.jsx';
 
 function useHashRoute() {
   const [hash, setHash] = useState(window.location.hash || '#/matchs');
@@ -29,7 +30,7 @@ function useHashRoute() {
 }
 
 const TABS = [
-  ['a-decider', 'À décider'], ['matchs', 'Matchs'], ['groupes', 'Groupes'], ['paris', 'Paris'],
+  ['matin', 'Matin'], ['a-decider', 'À décider'], ['matchs', 'Matchs'], ['groupes', 'Groupes'], ['paris', 'Paris'],
   ['risques', 'Risques'], ['sources', 'Sources'], ['equipes', 'Équipes'], ['bracket', 'Tableau'],
 ];
 
@@ -38,7 +39,8 @@ export default function App() {
   const { data: bk } = useApi('/bankroll', { refreshMs: 60000 });
 
   let page = null;
-  if (view === 'a-decider') page = <ADecider />;
+  if (view === 'matin') page = <Matin />;
+  else if (view === 'a-decider') page = <ADecider />;
   else if (view === 'paris') page = <Paris />;
   else if (view === 'risques') page = <Risques />;
   else if (view === 'sources') page = <Sources />;

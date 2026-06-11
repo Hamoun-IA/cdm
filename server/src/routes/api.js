@@ -21,6 +21,7 @@ import { matchTimeline } from '../services/matchTimelineService.js';
 import { riskDashboard } from '../services/riskService.js';
 import { listSourceProfiles, saveSourceProfile, updateSourceProfile } from '../services/sourceProfilesService.js';
 import { prepareMatch } from '../services/prepareService.js';
+import { matchdayMorning } from '../services/matchdayMorningService.js';
 
 const MATCH_SELECT = `
   SELECT m.*, th.name AS home_name, th.fifa_code AS home_code, th.flag_emoji AS home_flag,
@@ -69,6 +70,10 @@ export function apiRouter(db, { notify = null } = {}) {
 
   r.get('/actionables/today', (req, res) => {
     res.json(actionablesToday(db, req.query.date || null));
+  });
+
+  r.get('/matchday/morning', (req, res) => {
+    res.json(matchdayMorning(db, req.query.date || null));
   });
 
   r.get('/groups/:code/projections', (req, res) => {
