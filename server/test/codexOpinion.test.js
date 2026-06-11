@@ -99,3 +99,19 @@ test('generateCodexOpinion : fonctionne sans cotes avec priors conservateurs', (
   assert.ok(opinion.confidence_score < 50);
   assert.ok(opinion.forced_pick_label);
 });
+
+test('generateCodexOpinion : le choix forcé suit le scénario le plus probable, pas une value cachée', () => {
+  const db = freshDb();
+  for (const [outcome, price] of [['home', 1.47], ['draw', 4.75], ['away', 9.60]]) {
+    db.prepare(`
+      INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+      VALUES (1, 'sharp-book', 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+    `).run({ outcome, price });
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+
+  assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
+  assert.equal(opinion.forced_pick_selection, 'home');
+  assert.equal(opinion.forced_pick_label, 'Mexique');
+});

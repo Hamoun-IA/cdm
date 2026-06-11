@@ -271,9 +271,11 @@ function bestForcedPick(match, h2h, fairOdds, market, totals) {
       });
     }
   }
-  const priced = candidates.filter((c) => Number.isFinite(c.edge));
-  if (priced.length) return priced.sort((a, b) => b.edge - a.edge)[0];
-  return candidates.sort((a, b) => b.probability - a.probability)[0];
+  return candidates.sort((a, b) => {
+    const byProbability = b.probability - a.probability;
+    if (Math.abs(byProbability) > 0.0001) return byProbability;
+    return (b.edge ?? -Infinity) - (a.edge ?? -Infinity);
+  })[0];
 }
 
 function confidence({ market, totals, intel, scorecard, previous }) {
