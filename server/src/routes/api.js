@@ -19,6 +19,7 @@ import { createScorecard, latestScorecard, listScorecards } from '../services/sc
 import { createDecisionPostmortem, listDecisionPostmortems } from '../services/decisionPostmortemService.js';
 import { matchTimeline } from '../services/matchTimelineService.js';
 import { riskDashboard } from '../services/riskService.js';
+import { listSourceProfiles, saveSourceProfile, updateSourceProfile } from '../services/sourceProfilesService.js';
 
 const MATCH_SELECT = `
   SELECT m.*, th.name AS home_name, th.fifa_code AS home_code, th.flag_emoji AS home_flag,
@@ -275,6 +276,23 @@ export function apiRouter(db, { notify = null } = {}) {
 
   r.get('/risk', (req, res) => {
     res.json(riskDashboard(db));
+  });
+
+  // ── Sources ──────────────────────────────────────────────
+  r.get('/sources', (req, res) => {
+    res.json({ sources: listSourceProfiles(db) });
+  });
+
+  r.post('/sources', (req, res, next) => {
+    try {
+      res.status(201).json({ source: saveSourceProfile(db, req.body) });
+    } catch (e) { next(e); }
+  });
+
+  r.patch('/sources/:id', (req, res, next) => {
+    try {
+      res.json({ source: updateSourceProfile(db, Number(req.params.id), req.body) });
+    } catch (e) { next(e); }
   });
 
   // ── Santé ────────────────────────────────────────────────

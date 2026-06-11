@@ -273,3 +273,12 @@ des jalons espacés dans le temps. Le découpage fonctionnel du GOAL est respect
   et match, ainsi que des alertes sobres basées sur les limites configurées.
 - Ajout de la vue `Risques`, séparée de `Paris & bankroll`, pour contrôler
   l'exposition avant de prendre une nouvelle décision.
+
+## Roadmap cockpit — Point 8 qualité des sources (2026-06-11)
+
+- Ajout de `source_profiles`, registre éditable de sources avec type, fiabilité
+  structurelle, notes et date de revue. Cette qualité ne remplace pas la
+  fiabilité contextuelle d'une fiche Scout.
+- Ajout de `GET/POST/PATCH /api/sources` et de la vue `Sources`, qui affiche
+  aussi l'usage observé dans les fiches Scout (`match_intel`) et la dernière
+  fiabilité remontée par fiche.
