@@ -8,6 +8,8 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "seed": "node src/seed.js",
+    "backup": "node src/backup.js",
+    "backup:loop": "node src/backup.js --loop",
     "test": "node --test"
   },
   "dependencies": {

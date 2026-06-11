@@ -307,3 +307,10 @@ des jalons espacés dans le temps. Le découpage fonctionnel du GOAL est respect
   encodage.
 - Ce contrôle reste informatif : l'encodage manuel conserve les garde-fous
   serveur existants et les avertissements, sans blocage arbitraire côté UI.
+
+## Roadmap cockpit — Point 12 backups SQLite (2026-06-11)
+
+- Ajout de `server/src/backup.js`, script de backup cohérent de SQLite via
+  `better-sqlite3.backup()`, avec purge par rétention et mode `--loop`.
+- Ajout d'un service Docker Compose `backup`, de scripts npm, des variables
+  `.env.example` et d'une documentation `docs/BACKUPS.md`.

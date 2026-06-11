@@ -21,3 +21,19 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  backup:
+    build: .
+    container_name: wc26-cockpit-backup
+    env_file:
+      - .env
+    environment:
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_DIR: ${BACKUP_DIR:-/app/data/backups}
+    volumes:
+      - ./data:/app/data
+    command: ["node", "server/src/backup.js", "--loop"]
+    depends_on:
+      - cockpit
+    restart: unless-stopped
