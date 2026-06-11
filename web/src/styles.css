@@ -303,6 +303,17 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
 }
 
 .analyze-bar { display: flex; align-items: center; gap: .7rem; margin-bottom: .6rem; flex-wrap: wrap; }
+.prepare-result {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  align-items: center;
+  margin: -.2rem 0 .75rem;
+  padding: .45rem .55rem;
+  border-left: 3px solid var(--green);
+  background: var(--green-bg);
+  border-radius: 0 6px 6px 0;
+}
 
 /* ── Timeline match ───────────────────────────────────── */
 .timeline { display: grid; padding: .2rem .75rem .75rem; }

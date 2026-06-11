@@ -403,6 +403,8 @@ export default function MatchDetail({ id }) {
 
   // Analyse à la demande : 202 immédiat, puis on guette la nouvelle fiche intel.
   const [analyzing, setAnalyzing] = useState(null); // null | 'pending' | message d'erreur
+  const [preparing, setPreparing] = useState(false);
+  const [preparation, setPreparation] = useState(null);
   const baseline = useRef(null); // created_at de la fiche au moment de la demande
   const startedAt = useRef(0);
 
@@ -430,6 +432,20 @@ export default function MatchDetail({ id }) {
       await api(`/matches/${id}/analyze`, { method: 'POST' });
     } catch (e) {
       setAnalyzing(e.message);
+    }
+  };
+
+  const requestPrepare = async () => {
+    setPreparing(true);
+    setPreparation(null);
+    try {
+      const res = await api(`/matches/${id}/prepare`, { method: 'POST' });
+      setPreparation(res.preparation);
+      reload();
+    } catch (e) {
+      setPreparation({ error: e.message });
+    } finally {
+      setPreparing(false);
     }
   };
 
@@ -470,12 +486,26 @@ export default function MatchDetail({ id }) {
       <DecisionPostmortems decisions={data.decisions || []} postmortems={data.decision_postmortems || []} onSaved={reload} />
 
       <div className="analyze-bar">
+        <button className="primary" disabled={preparing} onClick={requestPrepare}>
+          {preparing ? 'Préparation…' : 'Préparer ce match'}
+        </button>
         <button className="ghost" disabled={analyzing === 'pending'} onClick={requestAnalysis}>
           {analyzing === 'pending' ? '🔭 Analyse en cours…' : '🔭 Analyser maintenant'}
         </button>
         {analyzing === 'pending' && <span className="small muted">le Scout enquête, la fiche apparaîtra ici (~2 min)</span>}
         {analyzing && analyzing !== 'pending' && <span className="small" style={{ color: 'var(--brick)' }}>{analyzing}</span>}
       </div>
+      {preparation?.error && <div className="errbox" style={{ marginBottom: '.7rem' }}>{preparation.error}</div>}
+      {preparation?.checklist?.length ? (
+        <div className="prepare-result">
+          <span className="small muted">Action suivante : {preparation.next_action}</span>
+          {preparation.checklist.map((item) => (
+            <span key={item.key} className={`tag ${item.status === 'missing' ? 'amber' : item.status === 'created' ? 'green' : 'ink'}`}>
+              {item.label}
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       <IntelCard intel={data.intel} />
 

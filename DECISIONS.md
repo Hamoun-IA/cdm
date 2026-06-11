@@ -282,3 +282,12 @@ des jalons espacés dans le temps. Le découpage fonctionnel du GOAL est respect
 - Ajout de `GET/POST/PATCH /api/sources` et de la vue `Sources`, qui affiche
   aussi l'usage observé dans les fiches Scout (`match_intel`) et la dernière
   fiabilité remontée par fiche.
+
+## Roadmap cockpit — Point 9 préparer ce match (2026-06-11)
+
+- Ajout de `POST /api/matches/:id/prepare`, action idempotente qui crée une
+  décision `WATCH` et une scorecard `ANALYZE_DEEPER` seulement si elles
+  n'existent pas déjà.
+- La fiche match affiche un bouton `Préparer ce match` et une checklist
+  décision/scorecard/Scout/cotes. Cette action cadre l'analyse mais ne crée
+  jamais de pari.

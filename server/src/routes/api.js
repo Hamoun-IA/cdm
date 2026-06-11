@@ -20,6 +20,7 @@ import { createDecisionPostmortem, listDecisionPostmortems } from '../services/d
 import { matchTimeline } from '../services/matchTimelineService.js';
 import { riskDashboard } from '../services/riskService.js';
 import { listSourceProfiles, saveSourceProfile, updateSourceProfile } from '../services/sourceProfilesService.js';
+import { prepareMatch } from '../services/prepareService.js';
 
 const MATCH_SELECT = `
   SELECT m.*, th.name AS home_name, th.fifa_code AS home_code, th.flag_emoji AS home_flag,
@@ -145,6 +146,12 @@ export function apiRouter(db, { notify = null } = {}) {
   r.post('/matches/:id/scorecards', (req, res, next) => {
     try {
       res.status(201).json({ scorecard: createScorecard(db, Number(req.params.id), req.body) });
+    } catch (e) { next(e); }
+  });
+
+  r.post('/matches/:id/prepare', (req, res, next) => {
+    try {
+      res.json({ preparation: prepareMatch(db, Number(req.params.id)) });
     } catch (e) { next(e); }
   });
 
