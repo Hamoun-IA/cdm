@@ -18,6 +18,7 @@ import { actionablesToday } from '../services/actionablesService.js';
 import { createScorecard, latestScorecard, listScorecards } from '../services/scorecardService.js';
 import { createDecisionPostmortem, listDecisionPostmortems } from '../services/decisionPostmortemService.js';
 import { matchTimeline } from '../services/matchTimelineService.js';
+import { riskDashboard } from '../services/riskService.js';
 
 const MATCH_SELECT = `
   SELECT m.*, th.name AS home_name, th.fifa_code AS home_code, th.flag_emoji AS home_flag,
@@ -270,6 +271,10 @@ export function apiRouter(db, { notify = null } = {}) {
   r.get('/bankroll', (req, res) => {
     ensureInit(db);
     res.json(bankrollStats(db));
+  });
+
+  r.get('/risk', (req, res) => {
+    res.json(riskDashboard(db));
   });
 
   // ── Santé ────────────────────────────────────────────────

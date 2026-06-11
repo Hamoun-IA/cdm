@@ -265,3 +265,11 @@ des jalons espacés dans le temps. Le découpage fonctionnel du GOAL est respect
   cotes, paris et post-mortems.
 - La fiche match affiche cette timeline juste sous le tableau d'affichage pour
   comprendre rapidement l'enchaînement des signaux sans ouvrir chaque bloc.
+
+## Roadmap cockpit — Point 7 dashboard risques (2026-06-11)
+
+- Ajout de `GET /api/risk`, qui calcule l'exposition ouverte, le retour
+  potentiel, la plus grosse mise ouverte, la concentration par journée, marché
+  et match, ainsi que des alertes sobres basées sur les limites configurées.
+- Ajout de la vue `Risques`, séparée de `Paris & bankroll`, pour contrôler
+  l'exposition avant de prendre une nouvelle décision.

@@ -506,6 +506,46 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
   .postmortem-form { grid-template-columns: 1fr; }
 }
 
+/* ── Risques ───────────────────────────────────────────── */
+.risk-threshold {
+  padding-bottom: .75rem;
+  display: grid;
+  gap: .75rem;
+}
+.risk-threshold > div:not(h3) {
+  padding: 0 .75rem;
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto;
+  gap: .35rem .75rem;
+  align-items: center;
+}
+.risk-bar {
+  grid-column: 1 / -1;
+  height: .48rem;
+  background: var(--line-soft);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.risk-bar span {
+  display: block;
+  height: 100%;
+  max-width: 100%;
+  background: linear-gradient(90deg, var(--green), var(--amber), var(--brick));
+}
+.risk-alerts { display: grid; gap: .45rem; margin: .8rem 0; }
+.risk-alert {
+  border-left: 3px solid var(--line-strong);
+  background: var(--panel);
+  border-radius: 0 6px 6px 0;
+  padding: .55rem .7rem;
+  display: flex;
+  gap: .55rem;
+  align-items: center;
+}
+.risk-alert.amber { border-left-color: var(--amber); background: var(--amber-bg); }
+.risk-alert.brick { border-left-color: var(--brick); background: var(--brick-bg); }
+.risk-cols { align-items: start; }
+
 /* ── À décider ────────────────────────────────────────── */
 .decision-board { display: grid; gap: .55rem; }
 .decision-match {
