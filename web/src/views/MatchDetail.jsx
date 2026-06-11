@@ -42,6 +42,16 @@ const RECO_FR = {
   BET_POSSIBLE: 'BET POSSIBLE',
 };
 const VERDICT_FR = { GOOD: 'Bonne décision', BAD: 'À corriger', NEUTRAL: 'Neutre' };
+const TIMELINE_TYPE_FR = {
+  match: 'Match',
+  decision: 'Décision',
+  scorecard: 'Scorecard',
+  intel: 'Scout',
+  suggestion: 'Suggestion',
+  bet: 'Pari',
+  postmortem: 'Post-mortem',
+  odds: 'Cotes',
+};
 
 function freshness(iso) {
   const mins = Math.round((Date.now() - new Date(iso)) / 60000);
@@ -121,6 +131,35 @@ function IntelCard({ intel }) {
 }
 
 const ANALYZE_TIMEOUT_MS = 5 * 60 * 1000;
+
+function Timeline({ events }) {
+  if (!events?.length) return null;
+  return (
+    <div className="card timeline-card" style={{ marginBottom: '.9rem' }}>
+      <h3>Timeline match <span className="note">{events.length}</span></h3>
+      <div className="timeline">
+        {events.slice(0, 12).map((e, i) => (
+          <div key={`${e.type}-${e.at}-${i}`} className={`timeline-item tl-${e.type}`}>
+            <div className="timeline-time num">{e.at?.slice(5, 16).replace('T', ' ')}</div>
+            <div className="timeline-dot" />
+            <div className="timeline-body">
+              <div>
+                <span className="timeline-kind">{TIMELINE_TYPE_FR[e.type] || e.type}</span>
+                <b>{e.title}</b>
+              </div>
+              {e.detail && <div className="small muted">{e.detail}</div>}
+              {e.meta?.reasons?.length ? (
+                <div className="timeline-tags">
+                  {e.meta.reasons.map((r) => <span key={r} className="tag ink">{REASONS_FR[r] || r}</span>)}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function DecisionCard({ matchId, latest, history, onSaved }) {
   const [decision, setDecision] = useState(latest?.decision || 'WATCH');
@@ -423,6 +462,8 @@ export default function MatchDetail({ id }) {
         </div>
         <div className="tm"><Flag emoji={m.away_flag} /> {m.away_display}</div>
       </div>
+
+      <Timeline events={data.timeline || []} />
 
       <DecisionCard matchId={id} latest={data.latest_decision} history={data.decisions || []} onSaved={reload} />
       <Scorecard matchId={id} latest={data.latest_scorecard} onSaved={reload} />

@@ -304,6 +304,57 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
 
 .analyze-bar { display: flex; align-items: center; gap: .7rem; margin-bottom: .6rem; flex-wrap: wrap; }
 
+/* ── Timeline match ───────────────────────────────────── */
+.timeline { display: grid; padding: .2rem .75rem .75rem; }
+.timeline-item {
+  display: grid;
+  grid-template-columns: 4.8rem 1rem 1fr;
+  gap: .55rem;
+  position: relative;
+  padding: .48rem 0;
+}
+.timeline-item::before {
+  content: "";
+  position: absolute;
+  left: 5.25rem;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line-soft);
+}
+.timeline-time {
+  color: var(--ink-low);
+  font-size: .86rem;
+  padding-top: .1rem;
+}
+.timeline-dot {
+  position: relative;
+  z-index: 1;
+  width: .62rem;
+  height: .62rem;
+  border-radius: 50%;
+  margin-top: .35rem;
+  background: var(--ink-low);
+  box-shadow: 0 0 0 3px var(--panel);
+}
+.tl-decision .timeline-dot, .tl-scorecard .timeline-dot { background: var(--amber); }
+.tl-bet .timeline-dot, .tl-suggestion .timeline-dot { background: var(--green); }
+.tl-postmortem .timeline-dot { background: var(--brick); }
+.timeline-body { display: grid; gap: .22rem; min-width: 0; }
+.timeline-kind {
+  display: inline-block;
+  margin-right: .45rem;
+  color: var(--ink-low);
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.timeline-tags { display: flex; gap: .3rem; flex-wrap: wrap; }
+@media (max-width: 720px) {
+  .timeline-item { grid-template-columns: 4.2rem .9rem 1fr; }
+  .timeline-item::before { left: 4.65rem; }
+}
+
 /* ── Décisions match ──────────────────────────────────── */
 .decision-current {
   padding: .65rem .75rem;

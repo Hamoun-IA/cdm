@@ -257,3 +257,11 @@ des jalons espacés dans le temps. Le découpage fonctionnel du GOAL est respect
 - La fiche match permet de rattacher une leçon à une décision existante, avec
   verdict, décision de recul éventuelle et note libre. Cette analyse reste
   séparée du journal de paris.
+
+## Roadmap cockpit — Point 6 timeline match (2026-06-11)
+
+- Ajout d'une timeline agrégée par match, construite à partir des événements
+  existants : coup d'envoi, décisions, scorecards, fiches Scout, suggestions,
+  cotes, paris et post-mortems.
+- La fiche match affiche cette timeline juste sous le tableau d'affichage pour
+  comprendre rapidement l'enchaînement des signaux sans ouvrir chaque bloc.

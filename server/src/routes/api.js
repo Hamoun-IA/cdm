@@ -17,6 +17,7 @@ import { createDecision, latestDecision, listDecisions } from '../services/decis
 import { actionablesToday } from '../services/actionablesService.js';
 import { createScorecard, latestScorecard, listScorecards } from '../services/scorecardService.js';
 import { createDecisionPostmortem, listDecisionPostmortems } from '../services/decisionPostmortemService.js';
+import { matchTimeline } from '../services/matchTimelineService.js';
 
 const MATCH_SELECT = `
   SELECT m.*, th.name AS home_name, th.fifa_code AS home_code, th.flag_emoji AS home_flag,
@@ -123,6 +124,7 @@ export function apiRouter(db, { notify = null } = {}) {
       decision_postmortems,
       latest_scorecard: latestScorecard(db, row.id),
       scorecards,
+      timeline: matchTimeline(db, row.id),
     });
   });
 
