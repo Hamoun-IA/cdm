@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openAt } from '../src/db.js';
-import { generateCodexOpinion, latestCodexOpinion, listCodexOpinions } from '../src/services/codexOpinionService.js';
+import { codexOpinionHistory, generateCodexOpinion, latestCodexOpinion, listCodexOpinions } from '../src/services/codexOpinionService.js';
 import { createScorecard } from '../src/services/scorecardService.js';
 import { createIntel } from '../src/services/intelService.js';
 
@@ -129,6 +129,35 @@ test('listCodexOpinions : marque un Over Under exact comme neutre', () => {
   assert.equal(opinion.evaluation.verdict, 'push');
   assert.equal(opinion.evaluation.forced_actual_selection, 'push');
   assert.equal(opinion.evaluation.forced_actual_label, 'Push 2');
+});
+
+test('codexOpinionHistory : rassemble les avis termines et compte seulement le pre-match', () => {
+  const db = freshDb();
+  insertHistoricalOpinion(db, {
+    matchId: 1,
+    generatedAt: '2026-06-11T08:00:00Z',
+    probabilities: { home: 0.62, draw: 0.24, away: 0.14 },
+    forcedSelection: 'home',
+  });
+  insertHistoricalOpinion(db, {
+    matchId: 1,
+    generatedAt: '2026-06-11T20:30:00Z',
+    probabilities: { home: 0.18, draw: 0.22, away: 0.6 },
+    forcedSelection: 'away',
+  });
+  db.prepare("UPDATE matches SET status = 'FINISHED', home_score = 2, away_score = 0 WHERE id = 1").run();
+
+  const history = codexOpinionHistory(db);
+
+  assert.equal(history.matches_count, 1);
+  assert.equal(history.summary.opinions_count, 2);
+  assert.equal(history.summary.prematch_count, 1);
+  assert.equal(history.summary.after_kickoff_count, 1);
+  assert.equal(history.summary.correct_count, 1);
+  assert.equal(history.summary.hit_rate, 1);
+  assert.equal(history.matches[0].match.home_display, 'Mexique');
+  assert.equal(history.matches[0].opinions[0].evaluation.is_prematch, false);
+  assert.equal(history.matches[0].opinions[1].evaluation.is_prematch, true);
 });
 
 test('generateCodexOpinion : fonctionne sans cotes avec priors conservateurs', () => {

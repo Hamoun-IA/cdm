@@ -721,6 +721,16 @@ function codexBrierScore(probs, actual) {
   }, 0));
 }
 
+function opinionTiming(opinion, match) {
+  if (!opinion.generated_at || !match.kickoff_utc) {
+    return { is_prematch: null, timing: 'unknown', timing_label: 'Timing inconnu' };
+  }
+  if (String(opinion.generated_at) < String(match.kickoff_utc)) {
+    return { is_prematch: true, timing: 'prematch', timing_label: 'Pré-match' };
+  }
+  return { is_prematch: false, timing: 'after_kickoff', timing_label: 'Après coup/live' };
+}
+
 function forcedPickResult(opinion, match, actual, goals) {
   const market = String(opinion.forced_pick_market || '');
   const selection = opinion.forced_pick_selection;
@@ -771,6 +781,7 @@ function evaluateCodexOpinion(opinion, match) {
   const goals = settled ? actualGoals(match) : null;
   const favorite = codexFavorite(opinion.probabilities);
   const forced = forcedPickResult(opinion, match, actual, goals);
+  const timing = opinionTiming(opinion, match);
   const labels = {
     hit: 'Correct',
     miss: 'Incorrect',
@@ -780,6 +791,7 @@ function evaluateCodexOpinion(opinion, match) {
 
   return {
     settled,
+    ...timing,
     verdict: forced.verdict,
     verdict_label: labels[forced.verdict],
     actual_score: settled ? actualScoreLabel(match) : null,
@@ -811,6 +823,108 @@ export function listCodexOpinions(db, matchId) {
       evaluation: evaluateCodexOpinion(opinion, match),
     };
   });
+}
+
+function mean(xs) {
+  const values = xs.filter((x) => Number.isFinite(Number(x))).map(Number);
+  if (!values.length) return null;
+  return round(values.reduce((s, x) => s + x, 0) / values.length);
+}
+
+function matchFromCodexHistoryRow(row) {
+  return decorateMatch({
+    id: row.match_id,
+    fifa_match_number: row.fifa_match_number,
+    stage: row.stage,
+    group_code: row.group_code,
+    matchday: row.matchday,
+    kickoff_utc: row.kickoff_utc,
+    home_team_id: row.home_team_id,
+    away_team_id: row.away_team_id,
+    home_score: row.home_score,
+    away_score: row.away_score,
+    status: row.status,
+    venue: row.venue,
+    city: row.city,
+    penalties: row.penalties,
+    home_name: row.home_name,
+    home_code: row.home_code,
+    home_flag: row.home_flag,
+    home_placeholder: row.home_placeholder,
+    away_name: row.away_name,
+    away_code: row.away_code,
+    away_flag: row.away_flag,
+    away_placeholder: row.away_placeholder,
+  });
+}
+
+function matchOpinionSummary(opinions) {
+  const counted = opinions.filter((opinion) =>
+    opinion.evaluation?.settled &&
+    opinion.evaluation?.is_prematch === true &&
+    ['hit', 'miss', 'push'].includes(opinion.evaluation.verdict)
+  );
+  const hits = counted.filter((opinion) => opinion.evaluation.verdict === 'hit').length;
+  const misses = counted.filter((opinion) => opinion.evaluation.verdict === 'miss').length;
+  const pushes = counted.filter((opinion) => opinion.evaluation.verdict === 'push').length;
+  const decisive = hits + misses;
+  const favoriteRated = counted.filter((opinion) => opinion.evaluation.favorite_hit != null);
+  return {
+    opinions_count: opinions.length,
+    prematch_count: counted.length,
+    after_kickoff_count: opinions.filter((opinion) => opinion.evaluation?.is_prematch === false).length,
+    correct_count: hits,
+    incorrect_count: misses,
+    neutral_count: pushes,
+    hit_rate: decisive ? round(hits / decisive) : null,
+    favorite_hit_rate: favoriteRated.length
+      ? round(favoriteRated.filter((opinion) => opinion.evaluation.favorite_hit).length / favoriteRated.length)
+      : null,
+    average_brier: mean(counted.map((opinion) => opinion.evaluation.brier_score)),
+  };
+}
+
+export function codexOpinionHistory(db) {
+  const rows = db.prepare(`
+    SELECT co.*,
+           m.fifa_match_number, m.stage, m.group_code, m.matchday, m.kickoff_utc,
+           m.home_team_id, m.away_team_id, m.home_score, m.away_score, m.status,
+           m.venue, m.city, m.penalties, m.home_placeholder, m.away_placeholder,
+           th.name AS home_name, th.fifa_code AS home_code, th.flag_emoji AS home_flag,
+           ta.name AS away_name, ta.fifa_code AS away_code, ta.flag_emoji AS away_flag
+    FROM codex_opinions co
+    JOIN matches m ON m.id = co.match_id
+    LEFT JOIN teams th ON th.id = m.home_team_id
+    LEFT JOIN teams ta ON ta.id = m.away_team_id
+    WHERE m.status = 'FINISHED'
+      AND m.home_score IS NOT NULL
+      AND m.away_score IS NOT NULL
+    ORDER BY m.kickoff_utc DESC, co.generated_at DESC, co.id DESC
+  `).all();
+
+  const byMatch = new Map();
+  const allOpinions = [];
+  for (const row of rows) {
+    const match = matchFromCodexHistoryRow(row);
+    const opinion = decode(row);
+    const evaluated = {
+      ...opinion,
+      evaluation: evaluateCodexOpinion(opinion, match),
+    };
+    allOpinions.push(evaluated);
+    if (!byMatch.has(match.id)) byMatch.set(match.id, { match, opinions: [] });
+    byMatch.get(match.id).opinions.push(evaluated);
+  }
+
+  const matches = [...byMatch.values()].map((entry) => ({
+    ...entry,
+    summary: matchOpinionSummary(entry.opinions),
+  }));
+  return {
+    summary: matchOpinionSummary(allOpinions),
+    matches_count: matches.length,
+    matches,
+  };
 }
 
 export function generateCodexOpinion(db, matchId) {

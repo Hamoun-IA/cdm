@@ -598,6 +598,66 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
 .codex-verdict.v-miss { color: var(--brick); background: var(--brick-bg); }
 .codex-verdict.v-push { color: var(--amber); background: var(--amber-bg); }
 .codex-verdict.v-pending { color: var(--ink-soft); background: var(--card-2); }
+.codex-ledger {
+  display: grid;
+  gap: .9rem;
+}
+.codex-ledger-card {
+  border-left: 3px solid var(--amber);
+}
+.codex-ledger-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: .8rem;
+  align-items: center;
+  padding: .65rem .75rem;
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+}
+.codex-ledger-head:hover {
+  text-decoration: none;
+  background: rgba(255,255,255,.02);
+}
+.codex-ledger-teams {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4.2rem minmax(0, 1fr);
+  gap: .6rem;
+  align-items: center;
+  font-family: var(--display);
+  font-size: 1.18rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.codex-ledger-teams span:first-child {
+  text-align: right;
+}
+.codex-ledger-teams b {
+  color: var(--green);
+  text-align: center;
+  font-size: 1.35rem;
+}
+.codex-ledger-meta {
+  display: grid;
+  gap: .12rem;
+  justify-items: end;
+  color: var(--ink-soft);
+  font-size: .68rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.codex-ledger-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .38rem;
+  align-items: center;
+  padding: .5rem .75rem;
+  border-bottom: 1px solid var(--line-soft);
+  background: rgba(255,255,255,.015);
+}
+.codex-history-item.is-after-kickoff {
+  opacity: .72;
+}
 
 .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: .9rem; }
 
@@ -637,6 +697,16 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
   .codex-head { flex-direction: column; }
   .codex-strip { grid-template-columns: 1fr; }
   .codex-history-item { grid-template-columns: 1fr; align-items: start; }
+  .codex-ledger-head { grid-template-columns: 1fr; }
+  .codex-ledger-meta { justify-items: start; }
+  .codex-ledger-teams {
+    grid-template-columns: 1fr;
+    text-align: left;
+  }
+  .codex-ledger-teams span:first-child,
+  .codex-ledger-teams b {
+    text-align: left;
+  }
 }
 
 .analyze-bar { display: flex; align-items: center; gap: .7rem; margin-bottom: .6rem; flex-wrap: wrap; }
