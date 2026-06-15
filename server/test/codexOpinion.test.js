@@ -67,7 +67,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v2');
+  assert.equal(opinion.model_version, 'codex-book-v3');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -150,11 +150,47 @@ test('generateCodexOpinion : la calibration n’utilise pas le résultat du matc
   assert.equal(opinion.diagnostics.calibration.h2h.n, 0);
 });
 
+test('generateCodexOpinion : pondère les matchs déjà joués par les équipes', () => {
+  const baselineDb = freshDb();
+  const baseline = generateCodexOpinion(baselineDb, 1);
+
+  const db = freshDb();
+  db.prepare("INSERT INTO teams (id, fifa_code, name, group_code) VALUES (3,'TST','Témoin A','A'), (4,'TSB','Témoin B','A')").run();
+  insertTeamResult(db, { id: 2, kickoff: '2026-06-10T15:00:00Z', home: 1, away: 3, homeScore: 3, awayScore: 0 });
+  insertTeamResult(db, { id: 3, kickoff: '2026-06-10T18:00:00Z', home: 4, away: 2, homeScore: 2, awayScore: 0 });
+
+  const opinion = generateCodexOpinion(db, 1);
+
+  assert.equal(opinion.diagnostics.team_form.home.played, 1);
+  assert.equal(opinion.diagnostics.team_form.away.played, 1);
+  assert.ok(opinion.diagnostics.team_form.h2h_delta > 0);
+  assert.ok(opinion.probabilities.home > baseline.probabilities.home);
+  assert.match(opinion.summary, /Forme tournoi intégrée/);
+});
+
+test('generateCodexOpinion : la forme tournoi ignore le résultat du match courant', () => {
+  const db = freshDb();
+  db.prepare("UPDATE matches SET status = 'FINISHED', home_score = 0, away_score = 4 WHERE id = 1").run();
+
+  const opinion = generateCodexOpinion(db, 1);
+
+  assert.equal(opinion.diagnostics.team_form.home.played, 0);
+  assert.equal(opinion.diagnostics.team_form.away.played, 0);
+  assert.equal(opinion.diagnostics.team_form.available, false);
+});
+
 function insertFinishedMatch(db, { id, kickoff, homeScore, awayScore }) {
   db.prepare(`
     INSERT INTO matches (id, fifa_match_number, stage, group_code, matchday, kickoff_utc, home_team_id, away_team_id, status, home_score, away_score)
     VALUES (@id, @fifa, 'GROUP', 'A', 1, @kickoff, 1, 2, 'FINISHED', @homeScore, @awayScore)
   `).run({ id, fifa: id, kickoff, homeScore, awayScore });
+}
+
+function insertTeamResult(db, { id, kickoff, home, away, homeScore, awayScore }) {
+  db.prepare(`
+    INSERT INTO matches (id, fifa_match_number, stage, group_code, matchday, kickoff_utc, home_team_id, away_team_id, status, home_score, away_score)
+    VALUES (@id, @fifa, 'GROUP', 'A', 1, @kickoff, @home, @away, 'FINISHED', @homeScore, @awayScore)
+  `).run({ id, fifa: id, kickoff, home, away, homeScore, awayScore });
 }
 
 function insertHistoricalOpinion(db, {
