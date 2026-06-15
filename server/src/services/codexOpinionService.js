@@ -703,6 +703,116 @@ export function latestCodexOpinion(db, matchId) {
   `).get(matchId));
 }
 
+function actualScoreLabel(match) {
+  if (match.home_score == null || match.away_score == null) return null;
+  return `${match.home_score}-${match.away_score}`;
+}
+
+function codexFavorite(probs) {
+  if (!validH2h(probs)) return null;
+  return H2H_OUTCOMES.reduce((acc, o) => probs[o] > probs[acc] ? o : acc, 'home');
+}
+
+function codexBrierScore(probs, actual) {
+  if (!actual || !validH2h(probs)) return null;
+  return round(H2H_OUTCOMES.reduce((s, outcome) => {
+    const observed = outcome === actual ? 1 : 0;
+    return s + (Number(probs[outcome]) - observed) ** 2;
+  }, 0));
+}
+
+function forcedPickResult(opinion, match, actual, goals) {
+  const market = String(opinion.forced_pick_market || '');
+  const selection = opinion.forced_pick_selection;
+  if (!actual || !Number.isFinite(goals)) {
+    return {
+      verdict: 'pending',
+      forced_actual_selection: null,
+      forced_actual_label: null,
+      forced_market_label: market || null,
+    };
+  }
+
+  if (market === '1X2' && H2H_OUTCOMES.includes(selection)) {
+    return {
+      verdict: selection === actual ? 'hit' : 'miss',
+      forced_actual_selection: actual,
+      forced_actual_label: teamName(match, actual),
+      forced_market_label: '1X2',
+    };
+  }
+
+  const m = market.match(/^OU_(\d+(?:\.\d+)?)$/);
+  if (m && ['over', 'under'].includes(selection)) {
+    const line = Number(m[1]);
+    const actualSide = goals > line ? 'over' : goals < line ? 'under' : 'push';
+    const label = actualSide === 'push'
+      ? `Push ${line}`
+      : `${actualSide === 'over' ? 'Over' : 'Under'} ${line}`;
+    return {
+      verdict: actualSide === 'push' ? 'push' : (selection === actualSide ? 'hit' : 'miss'),
+      forced_actual_selection: actualSide,
+      forced_actual_label: label,
+      forced_market_label: `O/U ${line}`,
+    };
+  }
+
+  return {
+    verdict: 'pending',
+    forced_actual_selection: null,
+    forced_actual_label: null,
+    forced_market_label: market || null,
+  };
+}
+
+function evaluateCodexOpinion(opinion, match) {
+  const settled = match.status === 'FINISHED' && match.home_score != null && match.away_score != null;
+  const actual = settled ? actualH2hOutcome(match) : null;
+  const goals = settled ? actualGoals(match) : null;
+  const favorite = codexFavorite(opinion.probabilities);
+  const forced = forcedPickResult(opinion, match, actual, goals);
+  const labels = {
+    hit: 'Correct',
+    miss: 'Incorrect',
+    push: 'Neutre',
+    pending: 'En attente',
+  };
+
+  return {
+    settled,
+    verdict: forced.verdict,
+    verdict_label: labels[forced.verdict],
+    actual_score: settled ? actualScoreLabel(match) : null,
+    actual_h2h: actual,
+    actual_h2h_label: actual ? teamName(match, actual) : null,
+    total_goals: goals,
+    forced_actual_selection: forced.forced_actual_selection,
+    forced_actual_label: forced.forced_actual_label,
+    forced_market_label: forced.forced_market_label,
+    favorite_selection: favorite,
+    favorite_label: favorite ? teamName(match, favorite) : null,
+    favorite_hit: settled && favorite ? favorite === actual : null,
+    brier_score: settled ? codexBrierScore(opinion.probabilities, actual) : null,
+  };
+}
+
+export function listCodexOpinions(db, matchId) {
+  const row = matchRow(db, matchId);
+  if (!row) return [];
+  const match = decorateMatch(row);
+  return db.prepare(`
+    SELECT * FROM codex_opinions
+    WHERE match_id = ?
+    ORDER BY generated_at DESC, id DESC
+  `).all(matchId).map((opinionRow) => {
+    const opinion = decode(opinionRow);
+    return {
+      ...opinion,
+      evaluation: evaluateCodexOpinion(opinion, match),
+    };
+  });
+}
+
 export function generateCodexOpinion(db, matchId) {
   const row = matchRow(db, matchId);
   if (!row) throw httpError(404, `Match ${matchId} introuvable.`);

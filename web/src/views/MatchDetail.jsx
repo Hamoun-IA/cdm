@@ -173,6 +173,15 @@ function pct0(x) {
   return x == null ? '—' : `${Math.round(Number(x) * 100)} %`;
 }
 
+function utcStamp(iso) {
+  return iso ? `${iso.slice(0, 16).replace('T', ' ')} UTC` : 'Date inconnue';
+}
+
+function brierLabel(score) {
+  if (score == null) return 'Brier n/a';
+  return `Brier ${Number(score).toFixed(3)}`;
+}
+
 function CodexOpinion({ opinion, match }) {
   if (!opinion) return null;
   const probs = opinion.probabilities || {};
@@ -225,6 +234,60 @@ function CodexOpinion({ opinion, match }) {
           <span>{opinion.change_summary}</span>
           <span>{opinion.generated_at?.slice(0, 16).replace('T', ' ')} UTC · {opinion.model_version}</span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function CodexOpinionHistory({ history, match }) {
+  if (match.status !== 'FINISHED' || !history?.length) return null;
+  const h2h = [
+    ['home', match.home_display],
+    ['draw', 'Nul'],
+    ['away', match.away_display],
+  ];
+  return (
+    <div className="card codex-history-card">
+      <h3>
+        Historique Avis Codex
+        <span className="note">{history.length} avis suivis</span>
+      </h3>
+      <div className="codex-history-list">
+        {history.map((opinion) => {
+          const ev = opinion.evaluation || {};
+          const verdict = ev.verdict || 'pending';
+          const probs = opinion.probabilities || {};
+          return (
+            <div key={opinion.id} className="codex-history-item">
+              <div className="codex-history-time">
+                <b>{utcStamp(opinion.generated_at)}</b>
+                <em>{opinion.model_version}</em>
+              </div>
+              <div className="codex-history-main">
+                <div className="codex-history-pick">
+                  <b>{opinion.forced_pick_label || 'Sans choix forcé'}</b>
+                  <span>{ev.forced_market_label || opinion.forced_pick_market || 'Marché inconnu'}</span>
+                </div>
+                <div className="codex-history-probs">
+                  {h2h.map(([key, label]) => (
+                    <span key={key}>{label} {pct0(probs[key])}</span>
+                  ))}
+                </div>
+                <p>{opinion.headline || opinion.summary}</p>
+              </div>
+              <div className="codex-history-result">
+                <span>Résultat réel</span>
+                <b>{ev.actual_score || 'n/a'}</b>
+                <em>{ev.actual_h2h_label || 'Non soldé'}</em>
+              </div>
+              <div className="codex-history-verdict">
+                <span className={`codex-verdict v-${verdict}`}>{ev.verdict_label || 'En attente'}</span>
+                <em>{brierLabel(ev.brier_score)}</em>
+                {ev.favorite_label ? <small>Favori modèle : {ev.favorite_label}</small> : null}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -608,6 +671,8 @@ export default function MatchDetail({ id }) {
       <MatchOpinion opinion={data.opinion} />
 
       <CodexOpinion opinion={data.codex_opinion} match={m} />
+
+      <CodexOpinionHistory history={data.codex_opinion_history} match={m} />
 
       <Timeline events={data.timeline || []} />
 

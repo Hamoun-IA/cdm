@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openAt } from '../src/db.js';
-import { generateCodexOpinion, latestCodexOpinion } from '../src/services/codexOpinionService.js';
+import { generateCodexOpinion, latestCodexOpinion, listCodexOpinions } from '../src/services/codexOpinionService.js';
 import { createScorecard } from '../src/services/scorecardService.js';
 import { createIntel } from '../src/services/intelService.js';
 
@@ -87,6 +87,48 @@ test('generateCodexOpinion : conserve l’historique et détecte une relance san
   assert.equal(second.input_hash, first.input_hash);
   assert.match(second.change_summary, /Aucun changement matériel/);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM codex_opinions WHERE match_id = 1').get().n, 2);
+});
+
+test('listCodexOpinions : evalue l historique une fois le match termine', () => {
+  const db = freshDb();
+  insertMarket(db);
+  const first = generateCodexOpinion(db, 1);
+  const second = generateCodexOpinion(db, 1);
+  db.prepare("UPDATE matches SET status = 'FINISHED', home_score = 2, away_score = 0 WHERE id = 1").run();
+
+  const history = listCodexOpinions(db, 1);
+
+  assert.equal(history.length, 2);
+  assert.equal(history[0].id, second.id);
+  assert.equal(history[1].id, first.id);
+  assert.equal(history[0].evaluation.settled, true);
+  assert.equal(history[0].evaluation.actual_score, '2-0');
+  assert.equal(history[0].evaluation.actual_h2h, 'home');
+  assert.equal(history[0].evaluation.actual_h2h_label, 'Mexique');
+  assert.equal(history[0].evaluation.favorite_selection, 'home');
+  assert.equal(history[0].evaluation.favorite_hit, true);
+  assert.equal(history[0].evaluation.verdict, 'hit');
+  assert.equal(typeof history[0].evaluation.brier_score, 'number');
+});
+
+test('listCodexOpinions : marque un Over Under exact comme neutre', () => {
+  const db = freshDb();
+  insertHistoricalOpinion(db, {
+    matchId: 1,
+    generatedAt: '2026-06-11T08:00:00Z',
+    forcedMarket: 'OU_2',
+    forcedSelection: 'over',
+    totals: [{ line: 2, probs: { over: 0.58, under: 0.42 }, fair_odds: { over: 1.72, under: 2.38 }, synthetic: false }],
+  });
+  db.prepare("UPDATE matches SET status = 'FINISHED', home_score = 1, away_score = 1 WHERE id = 1").run();
+
+  const [opinion] = listCodexOpinions(db, 1);
+
+  assert.equal(opinion.evaluation.settled, true);
+  assert.equal(opinion.evaluation.total_goals, 2);
+  assert.equal(opinion.evaluation.verdict, 'push');
+  assert.equal(opinion.evaluation.forced_actual_selection, 'push');
+  assert.equal(opinion.evaluation.forced_actual_label, 'Push 2');
 });
 
 test('generateCodexOpinion : fonctionne sans cotes avec priors conservateurs', () => {
