@@ -7,6 +7,7 @@ import { latestScorecard } from './scorecardService.js';
 
 const MODEL_VERSION = 'codex-book-v3';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
+const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
 
 function httpError(status, message) {
@@ -389,6 +390,82 @@ function applyTeamFormTotals(lines, form) {
   });
 }
 
+function liveContext(match) {
+  const active = LIVE_STATUSES.includes(match.status);
+  const homeScore = match.home_score == null ? null : Number(match.home_score);
+  const awayScore = match.away_score == null ? null : Number(match.away_score);
+  const scoreKnown = Number.isFinite(homeScore) && Number.isFinite(awayScore);
+  const goalDiff = scoreKnown ? homeScore - awayScore : null;
+  return {
+    active,
+    status: match.status,
+    score_known: scoreKnown,
+    home_score: scoreKnown ? homeScore : null,
+    away_score: scoreKnown ? awayScore : null,
+    score: scoreKnown ? `${homeScore}-${awayScore}` : null,
+    leader: !scoreKnown || goalDiff === 0 ? null : goalDiff > 0 ? 'home' : 'away',
+    goal_diff: scoreKnown ? goalDiff : null,
+    total_goals: scoreKnown ? homeScore + awayScore : null,
+    updated_at: match.updated_at || null,
+  };
+}
+
+function applyLiveH2hAdjustment(probs, live) {
+  if (!live?.active || !live.score_known) return probs;
+  if (live.leader === 'home') {
+    const lead = Math.abs(live.goal_diff);
+    const drawMove = lead >= 2 ? 0.08 : 0.07;
+    const awayMove = lead >= 2 ? 0.2 : 0.14;
+    return normalize({
+      home: clamp(probs.home + drawMove + awayMove, 0.025, 0.94),
+      draw: clamp(probs.draw - drawMove, 0.025, 0.94),
+      away: clamp(probs.away - awayMove, 0.025, 0.94),
+    });
+  }
+  if (live.leader === 'away') {
+    const lead = Math.abs(live.goal_diff);
+    const drawMove = lead >= 2 ? 0.08 : 0.07;
+    const homeMove = lead >= 2 ? 0.2 : 0.14;
+    return normalize({
+      home: clamp(probs.home - homeMove, 0.025, 0.94),
+      draw: clamp(probs.draw - drawMove, 0.025, 0.94),
+      away: clamp(probs.away + drawMove + homeMove, 0.025, 0.94),
+    });
+  }
+
+  const drawBoost = live.total_goals === 0 ? 0.055 : 0.04;
+  const nonDraw = Math.max(0.0001, probs.home + probs.away);
+  return normalize({
+    home: clamp(probs.home - drawBoost * (probs.home / nonDraw), 0.025, 0.94),
+    draw: clamp(probs.draw + drawBoost, 0.025, 0.94),
+    away: clamp(probs.away - drawBoost * (probs.away / nonDraw), 0.025, 0.94),
+  });
+}
+
+function applyLiveTotalsAdjustment(lines, live) {
+  if (!live?.active || !live.score_known) return lines;
+  return lines.map((line) => {
+    const currentGoals = live.total_goals;
+    let over = line.probs.over;
+    if (currentGoals > line.line) over = 0.98;
+    else if (currentGoals === line.line) over = Math.max(over, 0.58);
+    else {
+      const gap = line.line - currentGoals;
+      const bump = gap <= 0.5 ? 0.18 : gap <= 1.5 ? 0.1 : Math.min(0.08, currentGoals * 0.035);
+      over = over + bump;
+    }
+    over = clamp(over, 0.05, 0.98);
+    const probs = normalize({ over, under: 1 - over });
+    return {
+      ...line,
+      probs,
+      fair_odds: { over: impliedOdds(probs.over), under: impliedOdds(probs.under) },
+      lean: probs.over >= probs.under ? 'over' : 'under',
+      live_adjusted: true,
+    };
+  });
+}
+
 function matchRow(db, matchId) {
   return db.prepare(`
     SELECT m.*, th.name AS home_name, th.fifa_code AS home_code, th.flag_emoji AS home_flag,
@@ -597,7 +674,7 @@ function bestForcedPick(match, h2h, fairOdds, market, totals) {
   })[0];
 }
 
-function confidence({ market, totals, intel, scorecard, previous, calibration, teamForm }) {
+function confidence({ market, totals, intel, scorecard, previous, calibration, teamForm, live }) {
   let c = 30;
   if (market) c += 18;
   if (totals.some((t) => !t.synthetic)) c += 6;
@@ -615,6 +692,7 @@ function confidence({ market, totals, intel, scorecard, previous, calibration, t
     else if (calibration.forced.hit_rate >= 0.6) c += 2;
   }
   if (teamForm?.available) c += teamForm.home.played && teamForm.away.played ? 3 : 1;
+  if (live?.active) c += live.score_known ? 2 : -5;
   return clamp(Math.round(c), 20, 82);
 }
 
@@ -642,6 +720,7 @@ function changeSummary(previous, sources) {
   if (sources.latest_odds_at && sources.latest_odds_at > previous.generated_at) changed.push('cotes');
   if (sources.latest_calibration_result_at && sources.latest_calibration_result_at > previous.generated_at) changed.push('résultats précédents');
   if (sources.latest_team_form_match_at && sources.latest_team_form_match_at > previous.generated_at) changed.push('forme tournoi');
+  if (sources.live_score_changed) changed.push('score live');
   return changed.length
     ? `Nouveaux signaux depuis le dernier avis : ${changed.join(', ')}.`
     : 'Le profil de données a changé, sans nouvel horodatage clairement postérieur au dernier avis.';
@@ -675,7 +754,23 @@ function teamFormSummary(match, form) {
   return ` Forme tournoi intégrée : ${home}; ${away}; ${impactSide}.`;
 }
 
-function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm) {
+function liveContextSummary(match, live) {
+  if (!live?.active) return '';
+  if (!live.score_known) {
+    return ' Score live intégré : match en cours, mais le score exploitable manque encore; prudence renforcée.';
+  }
+  const home = teamName(match, 'home');
+  const away = teamName(match, 'away');
+  if (live.leader === 'home') {
+    return ` Score live intégré : ${home} mène ${live.score}; le modèle augmente le poids du scénario ${home}, sans minute détaillée disponible.`;
+  }
+  if (live.leader === 'away') {
+    return ` Score live intégré : ${away} mène ${live.score}; le modèle augmente le poids du scénario ${away}, sans minute détaillée disponible.`;
+  }
+  return ` Score live intégré : ${live.score}; le nul reprend du poids, avec prudence faute de chronologie détaillée.`;
+}
+
+function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live) {
   const ordered = H2H_OUTCOMES.slice().sort((a, b) => h2h[b] - h2h[a]);
   const fav = ordered[0];
   const favName = teamName(match, fav);
@@ -690,10 +785,11 @@ function summarize(match, h2h, totals, forced, conf, sources, calibration, teamF
     : 'Faute de marché complet, le modèle travaille sur priors conservateurs et signaux internes : confiance mécaniquement limitée.';
   const pick = ` Si obligation de se positionner : ${forced.label}.`;
   const form = teamFormSummary(match, teamForm);
+  const liveText = liveContextSummary(match, live);
   const learned = calibrationSummary(calibration);
   return {
     headline: `${favName} ${h2h[fav] >= 0.5 ? 'net favori Codex' : 'léger avantage Codex'}`,
-    summary: `${lead}${ou} ${data}${form}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
+    summary: `${lead}${ou}${liveText} ${data}${form}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
   };
 }
 
@@ -939,6 +1035,7 @@ export function generateCodexOpinion(db, matchId) {
   const odds = latestOddsRows(db, matchId);
   const calibration = historicalCalibration(db, matchId);
   const teamForm = teamTournamentForm(db, match);
+  const live = liveContext(match);
 
   const market = h2hMarket(odds);
   const base = market?.consensus || { home: 0.39, draw: 0.29, away: 0.32 };
@@ -948,22 +1045,41 @@ export function generateCodexOpinion(db, matchId) {
   h2h = applyQualitativeAdjustments(h2h, { favorite, scorecard, decision });
   h2h = applyTeamFormAdjustment(h2h, teamForm);
   h2h = applyHistoricalCalibration(h2h, calibration);
+  h2h = applyLiveH2hAdjustment(h2h, live);
   const fairOdds = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, impliedOdds(h2h[o])]));
 
   const rawTotals = totalsMarkets(odds);
-  const totals = applyTotalsCalibration(
-    applyTeamFormTotals(
-      adjustTotals(rawTotals.length ? rawTotals : syntheticTotalsFromH2h(h2h, scorecard), scorecard),
-      teamForm
+  const totals = applyLiveTotalsAdjustment(
+    applyTotalsCalibration(
+      applyTeamFormTotals(
+        adjustTotals(rawTotals.length ? rawTotals : syntheticTotalsFromH2h(h2h, scorecard), scorecard),
+        teamForm
+      ),
+      calibration
     ),
-    calibration
+    live
   );
   const forced = bestForcedPick(match, h2h, fairOdds, market, totals);
-  const conf = confidence({ market, totals, intel, scorecard, previous, calibration, teamForm });
+  const conf = confidence({ market, totals, intel, scorecard, previous, calibration, teamForm, live });
+  const previousLive = previous?.diagnostics?.live_context || null;
+  const liveScoreChanged = !!(live.active && previous && (
+    previousLive?.status !== live.status ||
+    previousLive?.home_score !== live.home_score ||
+    previousLive?.away_score !== live.away_score
+  ));
 
   const sourceShape = {
     model_version: MODEL_VERSION,
-    match: { id: match.id, home: match.home_display, away: match.away_display, kickoff_utc: match.kickoff_utc },
+    match: {
+      id: match.id,
+      home: match.home_display,
+      away: match.away_display,
+      kickoff_utc: match.kickoff_utc,
+      status: match.status,
+      home_score: match.home_score,
+      away_score: match.away_score,
+      updated_at: match.updated_at,
+    },
     intel: intel ? { id: intel.id, created_at: intel.created_at, reliability: intel.reliability, fresh_until: intel.fresh_until } : null,
     decision: decision ? { id: decision.id, created_at: decision.created_at, decision: decision.decision, reasons: decision.reasons } : null,
     scorecard: scorecard ? { id: scorecard.id, created_at: scorecard.created_at, recommendation: scorecard.recommendation } : null,
@@ -981,6 +1097,7 @@ export function generateCodexOpinion(db, matchId) {
       h2h_delta: teamForm.h2h_delta,
       totals_delta: teamForm.totals_delta,
     },
+    live_context: live,
   };
   const hash = inputHash(sourceShape);
   const sources = {
@@ -992,9 +1109,11 @@ export function generateCodexOpinion(db, matchId) {
     latest_odds_at: latestTimestamp(...odds.map((o) => o.taken_at)),
     latest_calibration_result_at: calibration.latest_result_at,
     latest_team_form_match_at: teamForm.latest_match_at,
+    latest_live_at: live.active ? live.updated_at : null,
+    live_score_changed: liveScoreChanged,
   };
   const changes = changeSummary(previous, sources);
-  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm);
+  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live);
   const diagnostics = {
     model_version: MODEL_VERSION,
     h2h_anchor: market ? 'market_demarginated_median_plus_team_form_history' : 'conservative_prior_plus_team_form_history',
@@ -1005,6 +1124,7 @@ export function generateCodexOpinion(db, matchId) {
     sources,
     calibration,
     team_form: teamForm,
+    live_context: live,
   };
 
   const generatedAt = nowUtcIso();

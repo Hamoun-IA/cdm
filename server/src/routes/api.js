@@ -24,6 +24,7 @@ import { prepareMatch } from '../services/prepareService.js';
 import { matchdayMorning } from '../services/matchdayMorningService.js';
 import { buildMatchOpinion } from '../services/matchOpinionService.js';
 import { codexOpinionHistory, generateCodexOpinion, latestCodexOpinion } from '../services/codexOpinionService.js';
+import { liveAnalysisDashboard, reviseLiveOpinion } from '../services/liveAnalysisService.js';
 
 const MATCH_SELECT = `
   SELECT m.*, th.name AS home_name, th.fifa_code AS home_code, th.flag_emoji AS home_flag,
@@ -76,6 +77,18 @@ export function apiRouter(db, { notify = null } = {}) {
 
   r.get('/codex-opinions/history', (req, res) => {
     res.json(codexOpinionHistory(db));
+  });
+
+  r.get('/live-analysis', (req, res, next) => {
+    try {
+      res.json(liveAnalysisDashboard(db));
+    } catch (e) { next(e); }
+  });
+
+  r.post('/live-analysis/matches/:id/revise', (req, res, next) => {
+    try {
+      res.status(201).json(reviseLiveOpinion(db, Number(req.params.id)));
+    } catch (e) { next(e); }
   });
 
   r.get('/matchday/morning', (req, res) => {
