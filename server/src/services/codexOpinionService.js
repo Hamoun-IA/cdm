@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v1';
+const MODEL_VERSION = 'codex-book-v2';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
 
@@ -68,6 +68,178 @@ function decode(row) {
     totals: safeJson(row.totals_json, []),
     diagnostics: safeJson(row.diagnostics_json, {}),
   };
+}
+
+function validH2h(probs) {
+  return probs && H2H_OUTCOMES.every((o) => Number.isFinite(Number(probs[o])));
+}
+
+function actualH2hOutcome(match) {
+  if (match.home_score == null || match.away_score == null) return null;
+  if (match.home_score > match.away_score) return 'home';
+  if (match.home_score < match.away_score) return 'away';
+  return 'draw';
+}
+
+function actualGoals(match) {
+  if (match.home_score == null || match.away_score == null) return null;
+  return Number(match.home_score) + Number(match.away_score);
+}
+
+function learningWeight(n, cap = 0.22, anchor = 18) {
+  if (!n) return 0;
+  return round(cap * (n / (n + anchor)));
+}
+
+function latestPrematchCodexOpinions(db, excludedMatchId) {
+  const rows = db.prepare(`
+    SELECT co.*, m.kickoff_utc, m.home_score, m.away_score, m.updated_at
+    FROM codex_opinions co
+    JOIN matches m ON m.id = co.match_id
+    WHERE co.match_id != @excludedMatchId
+      AND m.status = 'FINISHED'
+      AND m.home_score IS NOT NULL
+      AND m.away_score IS NOT NULL
+      AND co.generated_at < m.kickoff_utc
+    ORDER BY co.match_id, co.generated_at DESC, co.id DESC
+  `).all({ excludedMatchId: Number(excludedMatchId) || -1 });
+
+  const seen = new Set();
+  const latest = [];
+  for (const row of rows) {
+    if (seen.has(row.match_id)) continue;
+    seen.add(row.match_id);
+    latest.push(row);
+  }
+  return latest;
+}
+
+function calibrationDelta(bias, weight, maxMove) {
+  return clamp((Number(bias) || 0) * (Number(weight) || 0), -maxMove, maxMove);
+}
+
+function historicalCalibration(db, excludedMatchId) {
+  const rows = latestPrematchCodexOpinions(db, excludedMatchId);
+  const h2hPred = { home: 0, draw: 0, away: 0 };
+  const h2hActual = { home: 0, draw: 0, away: 0 };
+  let h2hN = 0;
+  let brier = 0;
+  let favoriteHits = 0;
+  let forcedN = 0;
+  let forcedHits = 0;
+  let totalsN = 0;
+  let totalsPredOver = 0;
+  let totalsActualOver = 0;
+  let latestResultAt = null;
+
+  for (const row of rows) {
+    const actual = actualH2hOutcome(row);
+    const probs = safeJson(row.probabilities_json, null);
+    if (actual && validH2h(probs)) {
+      h2hN += 1;
+      for (const outcome of H2H_OUTCOMES) {
+        const predicted = Number(probs[outcome]);
+        const observed = outcome === actual ? 1 : 0;
+        h2hPred[outcome] += predicted;
+        h2hActual[outcome] += observed;
+        brier += (predicted - observed) ** 2;
+      }
+      const favorite = H2H_OUTCOMES.reduce((acc, o) => probs[o] > probs[acc] ? o : acc, 'home');
+      if (favorite === actual) favoriteHits += 1;
+    }
+
+    if (row.forced_pick_market === '1X2' && H2H_OUTCOMES.includes(row.forced_pick_selection)) {
+      forcedN += 1;
+      if (row.forced_pick_selection === actual) forcedHits += 1;
+    } else {
+      const m = String(row.forced_pick_market || '').match(/^OU_(\d+(?:\.\d+)?)$/);
+      const goals = actualGoals(row);
+      if (m && Number.isFinite(goals)) {
+        const line = Number(m[1]);
+        const forcedActual = goals > line ? 'over' : goals < line ? 'under' : null;
+        if (forcedActual) {
+          forcedN += 1;
+          if (row.forced_pick_selection === forcedActual) forcedHits += 1;
+        }
+      }
+    }
+
+    const goals = actualGoals(row);
+    const totals = safeJson(row.totals_json, []);
+    if (Number.isFinite(goals) && Array.isArray(totals)) {
+      for (const line of totals) {
+        const point = Number(line.line);
+        const predOver = Number(line.probs?.over);
+        if (!Number.isFinite(point) || !Number.isFinite(predOver) || goals === point) continue;
+        totalsN += 1;
+        totalsPredOver += predOver;
+        totalsActualOver += goals > point ? 1 : 0;
+      }
+    }
+
+    latestResultAt = latestTimestamp(latestResultAt, row.updated_at, row.kickoff_utc);
+  }
+
+  const h2hPredAvg = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, h2hN ? round(h2hPred[o] / h2hN) : null]));
+  const h2hActualAvg = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, h2hN ? round(h2hActual[o] / h2hN) : null]));
+  const h2hBias = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, h2hN ? round(h2hActualAvg[o] - h2hPredAvg[o]) : 0]));
+  const totalsPredAvg = totalsN ? round(totalsPredOver / totalsN) : null;
+  const totalsActualAvg = totalsN ? round(totalsActualOver / totalsN) : null;
+
+  return {
+    available: h2hN > 0 || totalsN > 0,
+    latest_result_at: latestResultAt,
+    h2h: {
+      n: h2hN,
+      predicted: h2hPredAvg,
+      observed: h2hActualAvg,
+      bias: h2hBias,
+      weight: learningWeight(h2hN),
+      brier_score: h2hN ? round(brier / h2hN) : null,
+      favorite_hit_rate: h2hN ? round(favoriteHits / h2hN) : null,
+    },
+    totals: {
+      n: totalsN,
+      predicted_over_rate: totalsPredAvg,
+      observed_over_rate: totalsActualAvg,
+      bias_over: totalsN ? round(totalsActualAvg - totalsPredAvg) : 0,
+      weight: learningWeight(totalsN, 0.18, 24),
+    },
+    forced: {
+      n: forcedN,
+      hit_rate: forcedN ? round(forcedHits / forcedN) : null,
+    },
+  };
+}
+
+function applyHistoricalCalibration(probs, calibration) {
+  const h2h = calibration?.h2h;
+  if (!h2h?.n || !h2h.weight) return probs;
+  const adjusted = {};
+  for (const outcome of H2H_OUTCOMES) {
+    adjusted[outcome] = clamp(
+      probs[outcome] + calibrationDelta(h2h.bias?.[outcome], h2h.weight, 0.04),
+      0.025,
+      0.94
+    );
+  }
+  return normalize(adjusted);
+}
+
+function applyTotalsCalibration(lines, calibration) {
+  const totals = calibration?.totals;
+  if (!totals?.n || !totals.weight) return lines;
+  const delta = calibrationDelta(totals.bias_over, totals.weight, 0.035);
+  return lines.map((line) => {
+    const over = clamp(line.probs.over + delta, 0.05, 0.95);
+    const probs = normalize({ over, under: 1 - over });
+    return {
+      ...line,
+      probs,
+      fair_odds: { over: impliedOdds(probs.over), under: impliedOdds(probs.under) },
+      lean: probs.over >= probs.under ? 'over' : 'under',
+    };
+  });
 }
 
 function matchRow(db, matchId) {
@@ -278,7 +450,7 @@ function bestForcedPick(match, h2h, fairOdds, market, totals) {
   })[0];
 }
 
-function confidence({ market, totals, intel, scorecard, previous }) {
+function confidence({ market, totals, intel, scorecard, previous, calibration }) {
   let c = 30;
   if (market) c += 18;
   if (totals.some((t) => !t.synthetic)) c += 6;
@@ -290,6 +462,11 @@ function confidence({ market, totals, intel, scorecard, previous }) {
     c -= Number(scorecard.lineup_risk || 0) * 2;
   }
   if (previous) c += 3;
+  if (calibration?.h2h?.n >= 5) c += 2;
+  if (calibration?.forced?.n >= 5 && calibration.forced.hit_rate != null) {
+    if (calibration.forced.hit_rate < 0.45) c -= 5;
+    else if (calibration.forced.hit_rate >= 0.6) c += 2;
+  }
   return clamp(Math.round(c), 20, 82);
 }
 
@@ -315,12 +492,25 @@ function changeSummary(previous, sources) {
   if (sources.latest_scorecard_at && sources.latest_scorecard_at > previous.generated_at) changed.push('scorecard');
   if (sources.latest_decision_at && sources.latest_decision_at > previous.generated_at) changed.push('décision');
   if (sources.latest_odds_at && sources.latest_odds_at > previous.generated_at) changed.push('cotes');
+  if (sources.latest_calibration_result_at && sources.latest_calibration_result_at > previous.generated_at) changed.push('résultats précédents');
   return changed.length
     ? `Nouveaux signaux depuis le dernier avis : ${changed.join(', ')}.`
     : 'Le profil de données a changé, sans nouvel horodatage clairement postérieur au dernier avis.';
 }
 
-function summarize(match, h2h, totals, forced, conf, sources) {
+function calibrationSummary(calibration) {
+  const n = calibration?.h2h?.n || 0;
+  if (n >= 4) {
+    const hitRate = calibration.forced?.hit_rate != null
+      ? `, choix forcé juste ${(calibration.forced.hit_rate * 100).toFixed(0)} % du temps`
+      : '';
+    return ` La calibration relit ${n} avis pré-match déjà clos${hitRate}; l'effet reste plafonné pour éviter le surapprentissage.`;
+  }
+  if (n > 0) return ` ${n} avis pré-match clos sont suivis, mais l'échantillon reste trop court pour peser fortement.`;
+  return ' Aucun historique pré-match clos ne pèse encore sur ce calcul.';
+}
+
+function summarize(match, h2h, totals, forced, conf, sources, calibration) {
   const ordered = H2H_OUTCOMES.slice().sort((a, b) => h2h[b] - h2h[a]);
   const fav = ordered[0];
   const favName = teamName(match, fav);
@@ -334,9 +524,10 @@ function summarize(match, h2h, totals, forced, conf, sources) {
   const data = sources.market ? 'Le marché dé-marginé sert d’ancre, puis le modèle applique des ajustements prudents via Scout, scorecard et signaux internes.'
     : 'Faute de marché complet, le modèle travaille sur priors conservateurs et signaux internes : confiance mécaniquement limitée.';
   const pick = ` Si obligation de se positionner : ${forced.label}.`;
+  const learned = calibrationSummary(calibration);
   return {
     headline: `${favName} ${h2h[fav] >= 0.5 ? 'net favori Codex' : 'léger avantage Codex'}`,
-    summary: `${lead}${ou} ${data}${pick} Confiance ${confidenceLabel(conf)}.`,
+    summary: `${lead}${ou} ${data}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
   };
 }
 
@@ -356,6 +547,7 @@ export function generateCodexOpinion(db, matchId) {
   const previous = latestCodexOpinion(db, matchId);
   const suggestions = db.prepare('SELECT * FROM suggestions WHERE match_id = ? ORDER BY created_at DESC').all(matchId);
   const odds = latestOddsRows(db, matchId);
+  const calibration = historicalCalibration(db, matchId);
 
   const market = h2hMarket(odds);
   const base = market?.consensus || { home: 0.39, draw: 0.29, away: 0.32 };
@@ -363,12 +555,16 @@ export function generateCodexOpinion(db, matchId) {
   let h2h = suggestion ? blend(base, targetFromSuggestion(base, suggestion), 0.18) : base;
   const favorite = H2H_OUTCOMES.reduce((acc, o) => h2h[o] > h2h[acc] ? o : acc, 'home');
   h2h = applyQualitativeAdjustments(h2h, { favorite, scorecard, decision });
+  h2h = applyHistoricalCalibration(h2h, calibration);
   const fairOdds = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, impliedOdds(h2h[o])]));
 
   const rawTotals = totalsMarkets(odds);
-  const totals = adjustTotals(rawTotals.length ? rawTotals : syntheticTotalsFromH2h(h2h, scorecard), scorecard);
+  const totals = applyTotalsCalibration(
+    adjustTotals(rawTotals.length ? rawTotals : syntheticTotalsFromH2h(h2h, scorecard), scorecard),
+    calibration
+  );
   const forced = bestForcedPick(match, h2h, fairOdds, market, totals);
-  const conf = confidence({ market, totals, intel, scorecard, previous });
+  const conf = confidence({ market, totals, intel, scorecard, previous, calibration });
 
   const sourceShape = {
     model_version: MODEL_VERSION,
@@ -378,6 +574,11 @@ export function generateCodexOpinion(db, matchId) {
     scorecard: scorecard ? { id: scorecard.id, created_at: scorecard.created_at, recommendation: scorecard.recommendation } : null,
     suggestion: suggestion ? { id: suggestion.id, created_at: suggestion.created_at, outcome: suggestion.outcome, p: suggestion.est_probability } : null,
     odds: odds.map((o) => [o.market, o.outcome, o.point, o.price, o.bookmaker, o.taken_at]).slice(0, 120),
+    calibration: {
+      latest_result_at: calibration.latest_result_at,
+      h2h: { n: calibration.h2h.n, bias: calibration.h2h.bias, weight: calibration.h2h.weight },
+      totals: { n: calibration.totals.n, bias_over: calibration.totals.bias_over, weight: calibration.totals.weight },
+    },
   };
   const hash = inputHash(sourceShape);
   const sources = {
@@ -387,17 +588,19 @@ export function generateCodexOpinion(db, matchId) {
     latest_scorecard_at: scorecard?.created_at || null,
     latest_decision_at: decision?.created_at || null,
     latest_odds_at: latestTimestamp(...odds.map((o) => o.taken_at)),
+    latest_calibration_result_at: calibration.latest_result_at,
   };
   const changes = changeSummary(previous, sources);
-  const text = summarize(match, h2h, totals, forced, conf, sources);
+  const text = summarize(match, h2h, totals, forced, conf, sources, calibration);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median' : 'conservative_prior',
+    h2h_anchor: market ? 'market_demarginated_median_plus_history' : 'conservative_prior_plus_history',
     h2h_books: market?.books || 0,
     totals_lines: totals.map((t) => ({ line: t.line, books: t.books, synthetic: t.synthetic })),
     previous_opinion_id: previous?.id || null,
     input_hash: hash,
     sources,
+    calibration,
   };
 
   const generatedAt = nowUtcIso();

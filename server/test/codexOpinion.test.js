@@ -67,7 +67,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v1');
+  assert.equal(opinion.model_version, 'codex-book-v2');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -115,3 +115,75 @@ test('generateCodexOpinion : le choix forcé suit le scénario le plus probable,
   assert.equal(opinion.forced_pick_selection, 'home');
   assert.equal(opinion.forced_pick_label, 'Mexique');
 });
+
+test('generateCodexOpinion : affine les probabilités avec les avis pré-match déjà clos', () => {
+  const db = freshDb();
+  insertFinishedMatch(db, { id: 2, kickoff: '2026-06-12T19:00:00Z', homeScore: 2, awayScore: 0 });
+  insertFinishedMatch(db, { id: 3, kickoff: '2026-06-13T19:00:00Z', homeScore: 1, awayScore: 1 });
+  insertFinishedMatch(db, { id: 4, kickoff: '2026-06-14T19:00:00Z', homeScore: 1, awayScore: 0 });
+  insertHistoricalOpinion(db, { matchId: 2, generatedAt: '2026-06-12T08:00:00Z' });
+  insertHistoricalOpinion(db, { matchId: 3, generatedAt: '2026-06-13T08:00:00Z' });
+  insertHistoricalOpinion(db, { matchId: 4, generatedAt: '2026-06-14T08:00:00Z' });
+
+  const opinion = generateCodexOpinion(db, 1);
+
+  assert.equal(opinion.diagnostics.calibration.h2h.n, 3);
+  assert.equal(opinion.diagnostics.calibration.totals.n, 3);
+  assert.ok(opinion.diagnostics.calibration.h2h.bias.away < 0);
+  assert.ok(opinion.probabilities.away < 0.32);
+  assert.match(opinion.summary, /3 avis pré-match clos/);
+});
+
+test('generateCodexOpinion : la calibration n’utilise pas le résultat du match courant', () => {
+  const db = freshDb();
+  db.prepare("UPDATE matches SET status = 'FINISHED', home_score = 0, away_score = 4 WHERE id = 1").run();
+  insertHistoricalOpinion(db, {
+    matchId: 1,
+    generatedAt: '2026-06-11T08:00:00Z',
+    probabilities: { home: 0.9, draw: 0.07, away: 0.03 },
+    forcedSelection: 'home',
+  });
+
+  const opinion = generateCodexOpinion(db, 1);
+
+  assert.equal(opinion.previous_opinion_id, 1);
+  assert.equal(opinion.diagnostics.calibration.h2h.n, 0);
+});
+
+function insertFinishedMatch(db, { id, kickoff, homeScore, awayScore }) {
+  db.prepare(`
+    INSERT INTO matches (id, fifa_match_number, stage, group_code, matchday, kickoff_utc, home_team_id, away_team_id, status, home_score, away_score)
+    VALUES (@id, @fifa, 'GROUP', 'A', 1, @kickoff, 1, 2, 'FINISHED', @homeScore, @awayScore)
+  `).run({ id, fifa: id, kickoff, homeScore, awayScore });
+}
+
+function insertHistoricalOpinion(db, {
+  matchId,
+  generatedAt,
+  probabilities = { home: 0.15, draw: 0.15, away: 0.7 },
+  totals = [{ line: 2.5, probs: { over: 0.7, under: 0.3 }, fair_odds: { over: 1.43, under: 3.33 }, synthetic: false }],
+  forcedMarket = '1X2',
+  forcedSelection = 'away',
+} = {}) {
+  db.prepare(`
+    INSERT INTO codex_opinions (
+      match_id, previous_opinion_id, model_version, input_hash, headline, summary,
+      forced_pick_market, forced_pick_selection, forced_pick_label, confidence_score,
+      probabilities_json, fair_odds_json, totals_json, diagnostics_json, change_summary, generated_at
+    )
+    VALUES (
+      @match_id, NULL, 'codex-book-v1', @input_hash, 'Historique test', 'Historique test',
+      @forced_pick_market, @forced_pick_selection, @forced_pick_label, 50,
+      @probabilities_json, '{}', @totals_json, '{}', 'Historique test', @generated_at
+    )
+  `).run({
+    match_id: matchId,
+    input_hash: `hist-${matchId}`,
+    forced_pick_market: forcedMarket,
+    forced_pick_selection: forcedSelection,
+    forced_pick_label: forcedSelection,
+    probabilities_json: JSON.stringify(probabilities),
+    totals_json: JSON.stringify(totals),
+    generated_at: generatedAt,
+  });
+}
