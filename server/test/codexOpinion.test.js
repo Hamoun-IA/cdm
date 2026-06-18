@@ -77,6 +77,30 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
 });
 
+test('generateCodexOpinion : ignore les lignes Over Under entieres et quart de but', () => {
+  const db = freshDb();
+  for (const [outcome, price] of [['home', 1.90], ['draw', 3.45], ['away', 4.50]]) {
+    db.prepare(`
+      INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+      VALUES (1, 'book-a', 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+    `).run({ outcome, price });
+  }
+  for (const line of [2, 2.25, 2.5, 2.75, 3]) {
+    for (const [side, price] of [['over', 1.95], ['under', 1.88]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, point, price, taken_at)
+        VALUES (1, 'book-a', 'totals', @outcome, @point, @price, '2026-06-11T08:00:00Z')
+      `).run({ outcome: `${side}_${line}`, point: line, price });
+    }
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+
+  assert.deepEqual(opinion.totals.map((t) => t.line), [2.5]);
+  assert.equal(opinion.forced_pick_market.includes('OU_2.25'), false);
+  assert.equal(opinion.forced_pick_market.includes('OU_2.75'), false);
+});
+
 test('generateCodexOpinion : conserve l’historique et détecte une relance sans changement matériel', () => {
   const db = freshDb();
   insertMarket(db);

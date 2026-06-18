@@ -548,9 +548,13 @@ function totalsLine(row) {
   return m ? Number(m[1]) : null;
 }
 
+function isStandardTotalsLine(line) {
+  return Number.isFinite(line) && Math.abs(line * 2 - Math.round(line * 2)) < 0.0001 && Math.abs(line - Math.round(line)) > 0.0001;
+}
+
 function totalsMarkets(rows) {
   const latest = latestByKey(
-    rows.filter((r) => r.market === 'totals' && r.price > 1 && totalsOutcome(r) && Number.isFinite(totalsLine(r))),
+    rows.filter((r) => r.market === 'totals' && r.price > 1 && totalsOutcome(r) && isStandardTotalsLine(totalsLine(r))),
     (r) => `${r.bookmaker}|${totalsLine(r)}|${totalsOutcome(r)}`
   );
   const byLineBook = new Map();
