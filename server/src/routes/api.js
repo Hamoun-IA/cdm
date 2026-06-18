@@ -23,6 +23,7 @@ import { listSourceProfiles, saveSourceProfile, updateSourceProfile } from '../s
 import { prepareMatch } from '../services/prepareService.js';
 import { matchdayMorning } from '../services/matchdayMorningService.js';
 import { buildMatchOpinion } from '../services/matchOpinionService.js';
+import { codexComboForMatch } from '../services/codexComboService.js';
 import { codexOpinionHistory, generateCodexOpinion, latestCodexOpinion } from '../services/codexOpinionService.js';
 import { liveAnalysisDashboard, reviseLiveOpinion } from '../services/liveAnalysisService.js';
 
@@ -164,6 +165,7 @@ export function apiRouter(db, { notify = null } = {}) {
       latest_scorecard,
       scorecards,
       codex_opinion: latestCodexOpinion(db, row.id),
+      codex_combo: codexComboForMatch(db, row.id),
       timeline: matchTimeline(db, row.id),
     });
   });
@@ -195,6 +197,12 @@ export function apiRouter(db, { notify = null } = {}) {
   r.post('/matches/:id/codex-opinion', (req, res, next) => {
     try {
       res.status(201).json({ codex_opinion: generateCodexOpinion(db, Number(req.params.id)) });
+    } catch (e) { next(e); }
+  });
+
+  r.post('/matches/:id/codex-combo', (req, res, next) => {
+    try {
+      res.status(201).json({ codex_combo: codexComboForMatch(db, Number(req.params.id), { generateMissing: true }) });
     } catch (e) { next(e); }
   });
 

@@ -230,6 +230,79 @@ function CodexOpinion({ opinion, match }) {
   );
 }
 
+function fmtOdds(x) {
+  return x == null ? '—' : Number(x).toFixed(2);
+}
+
+function CodexCombo({ combo, onGenerate, pending, error }) {
+  if (!combo) return null;
+  const legs = combo.legs || [];
+  const missing = combo.missing_matches || [];
+  const canGenerate = !combo.ready || missing.length > 0;
+  return (
+    <div className="card codex-card codex-combo-card">
+      <div className="codex-head">
+        <div>
+          <div className="codex-kicker">Combiné Codex</div>
+          <h3>{combo.headline}</h3>
+        </div>
+        {combo.ready ? (
+          <div className="confidence-chip codex-confidence">
+            <span className="num">{combo.confidence_score}</span>
+            <span>confiance</span>
+          </div>
+        ) : null}
+      </div>
+      <div className="codex-body">
+        <p className="codex-summary">{combo.summary}</p>
+        {legs.length ? (
+          <div className="codex-combo-legs">
+            {legs.map((leg) => (
+              <div key={`${leg.match.id}-${leg.market}-${leg.selection}`} className="codex-combo-leg">
+                <span>{leg.match.kickoff_brussels} · {leg.match.label}</span>
+                <b>{leg.selection_label}</b>
+                <em>{leg.market_label} · {pct0(leg.probability)} · cote {fmtOdds(leg.fair_odds)}</em>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {combo.ready ? (
+          <div className="codex-combo-metrics">
+            <div>
+              <span>Probabilité combinée</span>
+              <b>{pct0(combo.combined_probability)}</b>
+            </div>
+            <div>
+              <span>Cote théorique</span>
+              <b>{fmtOdds(combo.combined_fair_odds)}</b>
+            </div>
+          </div>
+        ) : null}
+        {missing.length ? (
+          <div className="codex-combo-missing">
+            <span>Avis manquant</span>
+            <b>{missing.map((match) => match.label).join(' · ')}</b>
+          </div>
+        ) : null}
+        {combo.risk_flags?.length ? (
+          <div className="codex-combo-risks">
+            {combo.risk_flags.map((flag) => <span key={flag}>{flag}</span>)}
+          </div>
+        ) : null}
+        <div className="codex-combo-actions">
+          <span className="small muted">{combo.disclaimer}</span>
+          {canGenerate ? (
+            <button className="ghost" disabled={pending} onClick={onGenerate}>
+              {pending ? 'Préparation…' : 'Préparer le combiné'}
+            </button>
+          ) : null}
+        </div>
+        {error && <div className="errbox">{error}</div>}
+      </div>
+    </div>
+  );
+}
+
 const ANALYZE_TIMEOUT_MS = 5 * 60 * 1000;
 
 function Timeline({ events }) {
@@ -518,6 +591,7 @@ export default function MatchDetail({ id }) {
   // Analyse à la demande : 202 immédiat, puis on guette la nouvelle fiche intel.
   const [analyzing, setAnalyzing] = useState(null); // null | 'pending' | message d'erreur
   const [codexing, setCodexing] = useState(null); // null | 'pending' | message d'erreur
+  const [comboing, setComboing] = useState(null); // null | 'pending' | message d'erreur
   const [preparing, setPreparing] = useState(false);
   const [preparation, setPreparation] = useState(null);
   const baseline = useRef(null); // created_at de la fiche au moment de la demande
@@ -575,6 +649,17 @@ export default function MatchDetail({ id }) {
     }
   };
 
+  const requestCodexCombo = async () => {
+    setComboing('pending');
+    try {
+      await api(`/matches/${id}/codex-combo`, { method: 'POST' });
+      setComboing(null);
+      reload();
+    } catch (e) {
+      setComboing(e.message);
+    }
+  };
+
   if (loading) return <div className="loading">Chargement…</div>;
   if (!data?.match) return <div className="errbox">Match introuvable.</div>;
   const m = data.match;
@@ -608,6 +693,13 @@ export default function MatchDetail({ id }) {
       <MatchOpinion opinion={data.opinion} />
 
       <CodexOpinion opinion={data.codex_opinion} match={m} />
+
+      <CodexCombo
+        combo={data.codex_combo}
+        onGenerate={requestCodexCombo}
+        pending={comboing === 'pending'}
+        error={comboing && comboing !== 'pending' ? comboing : null}
+      />
 
       <Timeline events={data.timeline || []} />
 

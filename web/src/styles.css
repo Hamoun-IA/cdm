@@ -505,6 +505,102 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
   border-top: 1px solid var(--line-soft);
   padding-top: .55rem;
 }
+.codex-combo-card {
+  border-left-color: var(--green);
+}
+.codex-combo-card .codex-kicker,
+.codex-combo-card .codex-confidence .num {
+  color: var(--green);
+}
+.codex-combo-legs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .45rem;
+}
+.codex-combo-leg {
+  min-width: 0;
+  padding: .5rem .6rem;
+  background: var(--card-2);
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+}
+.codex-combo-leg span,
+.codex-combo-metrics span,
+.codex-combo-missing span {
+  display: block;
+  color: var(--ink-soft);
+  font-size: .66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.codex-combo-leg b {
+  display: block;
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 1.2rem;
+  line-height: 1.1;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-top: .12rem;
+}
+.codex-combo-leg em {
+  display: block;
+  color: var(--ink-soft);
+  font-size: .72rem;
+  font-style: normal;
+  margin-top: .12rem;
+}
+.codex-combo-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .45rem;
+}
+.codex-combo-metrics div {
+  padding: .45rem .55rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: rgba(76, 195, 138, .05);
+}
+.codex-combo-metrics b {
+  display: block;
+  color: var(--green);
+  font-family: var(--display);
+  font-size: 1.45rem;
+  line-height: 1.1;
+}
+.codex-combo-missing {
+  padding: .5rem .6rem;
+  border-left: 3px solid var(--amber);
+  background: var(--amber-bg);
+  border-radius: 0 6px 6px 0;
+}
+.codex-combo-missing b {
+  display: block;
+  color: var(--ink);
+  margin-top: .12rem;
+}
+.codex-combo-risks {
+  display: grid;
+  gap: .3rem;
+}
+.codex-combo-risks span {
+  padding: .42rem .55rem;
+  border-left: 3px solid var(--amber);
+  background: var(--amber-bg);
+  border-radius: 0 6px 6px 0;
+  color: var(--ink-mid);
+  font-size: .75rem;
+}
+.codex-combo-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .7rem;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line-soft);
+  padding-top: .55rem;
+}
 .codex-history-card {
   margin-bottom: .9rem;
   border-left: 3px solid var(--line-strong);
@@ -955,6 +1051,8 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
   .opinion-row { grid-template-columns: 1fr; gap: .25rem; }
   .codex-head { flex-direction: column; }
   .codex-strip { grid-template-columns: 1fr; }
+  .codex-combo-legs,
+  .codex-combo-metrics { grid-template-columns: 1fr; }
   .codex-history-item { grid-template-columns: 1fr; align-items: start; }
   .codex-ledger-head { grid-template-columns: 1fr; }
   .codex-ledger-meta { justify-items: start; }
