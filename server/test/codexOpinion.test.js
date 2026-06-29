@@ -67,13 +67,13 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v4');
+  assert.equal(opinion.model_version, 'codex-book-v5');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_weighted_history');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_power_rating_weighted_history');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -288,9 +288,37 @@ test('generateCodexOpinion : pondère les matchs déjà joués par les équipes'
   assert.equal(opinion.diagnostics.team_form.away.played, 1);
   assert.equal(opinion.diagnostics.team_form.home.opponent_sample, 1);
   assert.equal(opinion.diagnostics.team_form.away.opponent_sample, 1);
+  assert.equal(opinion.diagnostics.team_form.power_rating.available, true);
   assert.ok(opinion.diagnostics.team_form.h2h_delta > 0);
   assert.ok(opinion.probabilities.home > baseline.probabilities.home);
   assert.match(opinion.summary, /Forme tournoi intégrée/);
+});
+
+test('generateCodexOpinion : le rating dynamique valorise une surperformance face aux attentes', () => {
+  const db = freshDb();
+  db.prepare("INSERT INTO teams (id, fifa_code, name, group_code) VALUES (3,'TST','Témoin A','A'), (4,'TSB','Témoin B','A')").run();
+  insertTeamResult(db, { id: 2, kickoff: '2026-06-10T15:00:00Z', home: 1, away: 3, homeScore: 1, awayScore: 0 });
+  insertTeamResult(db, { id: 3, kickoff: '2026-06-10T18:00:00Z', home: 2, away: 4, homeScore: 1, awayScore: 0 });
+  insertHistoricalOpinion(db, {
+    matchId: 2,
+    generatedAt: '2026-06-10T08:00:00Z',
+    probabilities: { home: 0.18, draw: 0.24, away: 0.58 },
+    forcedSelection: 'away',
+  });
+  insertHistoricalOpinion(db, {
+    matchId: 3,
+    generatedAt: '2026-06-10T08:00:00Z',
+    probabilities: { home: 0.72, draw: 0.18, away: 0.1 },
+    forcedSelection: 'home',
+  });
+
+  const opinion = generateCodexOpinion(db, 1);
+
+  assert.equal(opinion.diagnostics.team_form.home.points, opinion.diagnostics.team_form.away.points);
+  assert.equal(opinion.diagnostics.team_form.home.gd, opinion.diagnostics.team_form.away.gd);
+  assert.ok(opinion.diagnostics.team_form.power_rating.home.rating > opinion.diagnostics.team_form.power_rating.away.rating);
+  assert.ok(opinion.diagnostics.team_form.power_rating.h2h_delta > 0);
+  assert.match(opinion.summary, /Rating dynamique/);
 });
 
 test('generateCodexOpinion : la forme tournoi ignore le résultat du match courant', () => {

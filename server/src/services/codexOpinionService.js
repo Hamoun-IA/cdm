@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v4';
+const MODEL_VERSION = 'codex-book-v5';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -328,10 +328,160 @@ function pointsFor(gf, ga) {
   return 0;
 }
 
+function outcomeShare(gf, ga) {
+  if (gf > ga) return 1;
+  if (gf === ga) return 0.5;
+  return 0;
+}
+
 function expectedPointsFromOpinion(row, isHome) {
   const probs = safeJson(row.probabilities_json, null);
   if (!validH2h(probs)) return null;
   return isHome ? 3 * probs.home + probs.draw : 3 * probs.away + probs.draw;
+}
+
+function expectedShareFromOpinion(row) {
+  const probs = safeJson(row.probabilities_json, null);
+  if (!validH2h(probs)) return null;
+  return clamp(Number(probs.home) + Number(probs.draw) * 0.5, 0.05, 0.95);
+}
+
+function ratingExpectedShare(diff) {
+  return 1 / (1 + Math.exp(-clamp(diff, -1.8, 1.8) * 2.4));
+}
+
+function powerTeamProfile(map, teamId) {
+  if (!map.has(teamId)) {
+    map.set(teamId, {
+      played: 0,
+      rating: 0,
+      gd: 0,
+      gf: 0,
+      ga: 0,
+      expected_sample: 0,
+      surprise_total: 0,
+      latest_match_at: null,
+    });
+  }
+  return map.get(teamId);
+}
+
+function tournamentPowerRows(db, cutoffUtc, excludedMatchId) {
+  if (!cutoffUtc) return [];
+  return db.prepare(`
+    SELECT m.id, m.kickoff_utc, m.stage, m.home_team_id, m.away_team_id, m.home_score, m.away_score,
+           co.probabilities_json
+    FROM matches m
+    LEFT JOIN codex_opinions co ON co.id = (
+      SELECT id FROM codex_opinions
+      WHERE match_id = m.id
+        AND generated_at < m.kickoff_utc
+      ORDER BY generated_at DESC, id DESC
+      LIMIT 1
+    )
+    WHERE m.id != @excludedMatchId
+      AND m.status = 'FINISHED'
+      AND m.home_score IS NOT NULL
+      AND m.away_score IS NOT NULL
+      AND m.home_team_id IS NOT NULL
+      AND m.away_team_id IS NOT NULL
+      AND m.kickoff_utc < @cutoffUtc
+    ORDER BY m.kickoff_utc, m.id
+  `).all({ cutoffUtc, excludedMatchId: Number(excludedMatchId) || -1 });
+}
+
+function tournamentPowerRatings(db, cutoffUtc, excludedMatchId) {
+  const rows = tournamentPowerRows(db, cutoffUtc, excludedMatchId);
+  const teams = new Map();
+
+  for (const row of rows) {
+    const home = powerTeamProfile(teams, row.home_team_id);
+    const away = powerTeamProfile(teams, row.away_team_id);
+    const homeGoals = Number(row.home_score);
+    const awayGoals = Number(row.away_score);
+    const actualHome = outcomeShare(homeGoals, awayGoals);
+    const ratingExpected = ratingExpectedShare(home.rating - away.rating);
+    const opinionExpected = expectedShareFromOpinion(row);
+    const expectedHome = opinionExpected == null
+      ? ratingExpected
+      : ratingExpected * 0.35 + opinionExpected * 0.65;
+    const goalDiff = homeGoals - awayGoals;
+    const margin = 1 + clamp(Math.abs(goalDiff) - 1, 0, 3) * 0.16;
+    const stageWeight = row.stage === 'GROUP' ? 1 : 1.08;
+    const delta = clamp((actualHome - expectedHome) * 0.24 * margin * stageWeight, -0.18, 0.18);
+
+    home.rating += delta;
+    away.rating -= delta;
+    home.played += 1;
+    away.played += 1;
+    home.gf += homeGoals;
+    home.ga += awayGoals;
+    away.gf += awayGoals;
+    away.ga += homeGoals;
+    home.gd += goalDiff;
+    away.gd -= goalDiff;
+    home.latest_match_at = latestTimestamp(home.latest_match_at, row.kickoff_utc);
+    away.latest_match_at = latestTimestamp(away.latest_match_at, row.kickoff_utc);
+
+    if (opinionExpected != null) {
+      home.expected_sample += 1;
+      away.expected_sample += 1;
+      home.surprise_total += actualHome - opinionExpected;
+      away.surprise_total += opinionExpected - actualHome;
+    }
+  }
+
+  return { teams, matches: rows.length, latest_match_at: latestTimestamp(...rows.map((r) => r.kickoff_utc)) };
+}
+
+function powerSnapshot(power, teamId) {
+  const profile = teamId ? power.teams.get(teamId) : null;
+  if (!profile) {
+    return {
+      played: 0,
+      rating: 0,
+      raw_rating: 0,
+      sample_weight: 0,
+      gd: 0,
+      expected_sample: 0,
+      surprise_per_match: null,
+      latest_match_at: null,
+    };
+  }
+  const sampleWeight = profile.played / (profile.played + 1.5);
+  const rating = profile.rating * sampleWeight;
+  return {
+    played: profile.played,
+    rating: round(rating),
+    raw_rating: round(profile.rating),
+    sample_weight: round(sampleWeight),
+    gd: profile.gd,
+    goals_for: profile.gf,
+    goals_against: profile.ga,
+    expected_sample: profile.expected_sample,
+    surprise_per_match: profile.expected_sample ? round(profile.surprise_total / profile.expected_sample) : null,
+    latest_match_at: profile.latest_match_at,
+  };
+}
+
+function tournamentPowerContext(db, match) {
+  const power = tournamentPowerRatings(db, match.kickoff_utc, match.id);
+  const home = powerSnapshot(power, match.home_team_id);
+  const away = powerSnapshot(power, match.away_team_id);
+  const available = home.played > 0 || away.played > 0;
+  const diff = home.rating - away.rating;
+  const stageMultiplier = match.stage === 'GROUP' ? 1 : 1.18;
+  const h2hDelta = available ? clamp(diff * 0.18 * stageMultiplier, -0.045, 0.045) : 0;
+  return {
+    available,
+    matches: power.matches,
+    home,
+    away,
+    rating_diff: round(diff),
+    stage_multiplier: round(stageMultiplier),
+    h2h_delta: round(h2hDelta),
+    latest_match_at: latestTimestamp(power.latest_match_at, home.latest_match_at, away.latest_match_at),
+  };
 }
 
 function basicTeamProfile(db, teamId, cutoffUtc, excludedMatchId) {
@@ -449,10 +599,12 @@ function teamFormStats(db, teamId, cutoffUtc, excludedMatchId) {
 function teamTournamentForm(db, match) {
   const home = teamFormStats(db, match.home_team_id, match.kickoff_utc, match.id);
   const away = teamFormStats(db, match.away_team_id, match.kickoff_utc, match.id);
-  const available = home.played > 0 || away.played > 0;
+  const powerRating = tournamentPowerContext(db, match);
+  const available = home.played > 0 || away.played > 0 || powerRating.available;
   const diff = home.strength - away.strength;
   const stageMultiplier = match.stage === 'GROUP' ? 1 : 1.22;
-  const h2hDelta = available ? clamp(diff * 0.07 * stageMultiplier, -0.06, 0.06) : 0;
+  const resultH2hDelta = (home.played > 0 || away.played > 0) ? clamp(diff * 0.065 * stageMultiplier, -0.052, 0.052) : 0;
+  const h2hDelta = available ? clamp(resultH2hDelta + (powerRating.h2h_delta || 0), -0.075, 0.075) : 0;
   const homeGoals = home.total_goals_per_match;
   const awayGoals = away.total_goals_per_match;
   const goalsSamples = [homeGoals, awayGoals].filter((x) => Number.isFinite(x));
@@ -467,9 +619,11 @@ function teamTournamentForm(db, match) {
     away,
     strength_diff: round(diff),
     stage_multiplier: round(stageMultiplier),
+    result_h2h_delta: round(resultH2hDelta),
+    power_rating: powerRating,
     h2h_delta: round(h2hDelta),
     totals_delta: round(totalsDelta),
-    latest_match_at: latestTimestamp(home.latest_match_at, away.latest_match_at),
+    latest_match_at: latestTimestamp(home.latest_match_at, away.latest_match_at, powerRating.latest_match_at),
   };
 }
 
@@ -916,6 +1070,7 @@ function confidence({ market, totals, intel, scorecard, previous, calibration, t
     else if (calibration.forced.hit_rate >= 0.6) c += 2;
   }
   if (teamForm?.available) c += teamForm.home.played && teamForm.away.played ? 3 : 1;
+  if (teamForm?.power_rating?.available && teamForm.power_rating.matches >= 8) c += 1;
   if (marketMovement?.available && marketMovement.max_delta >= 0.025) c += 1;
   if (live?.active) c += live.score_known ? 2 : -5;
   return clamp(Math.round(c), 20, 82);
@@ -983,7 +1138,10 @@ function teamFormSummary(match, form) {
   const opponentText = (form.home.opponent_sample || form.away.opponent_sample)
     ? 'Adversaires rencontrés inclus.'
     : '';
-  return ` Forme tournoi intégrée : ${home}; ${away}; ${impactSide}.${opponentText ? ` ${opponentText}` : ''}`;
+  const power = form.power_rating?.available
+    ? ` Rating dynamique: ${homeName} ${form.power_rating.home.rating >= 0 ? '+' : ''}${form.power_rating.home.rating}, ${awayName} ${form.power_rating.away.rating >= 0 ? '+' : ''}${form.power_rating.away.rating}.`
+    : '';
+  return ` Forme tournoi intégrée : ${home}; ${away}; ${impactSide}.${opponentText ? ` ${opponentText}` : ''}${power}`;
 }
 
 function liveContextSummary(match, live) {
@@ -1350,6 +1508,15 @@ export function generateCodexOpinion(db, matchId) {
         played: teamForm.away.played, points: teamForm.away.points, gd: teamForm.away.gd,
         strength: teamForm.away.strength, opponent_strength_avg: teamForm.away.opponent_strength_avg,
       },
+      power_rating: {
+        available: teamForm.power_rating.available,
+        matches: teamForm.power_rating.matches,
+        home_rating: teamForm.power_rating.home.rating,
+        away_rating: teamForm.power_rating.away.rating,
+        rating_diff: teamForm.power_rating.rating_diff,
+        h2h_delta: teamForm.power_rating.h2h_delta,
+      },
+      result_h2h_delta: teamForm.result_h2h_delta,
       h2h_delta: teamForm.h2h_delta,
       totals_delta: teamForm.totals_delta,
     },
@@ -1382,7 +1549,7 @@ export function generateCodexOpinion(db, matchId) {
   const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_weighted_history' : 'conservative_prior_plus_team_form_weighted_history',
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_power_rating_weighted_history' : 'conservative_prior_plus_team_form_power_rating_weighted_history',
     h2h_books: market?.books || 0,
     market_movement: marketMovement,
     totals_lines: totals.map((t) => ({
