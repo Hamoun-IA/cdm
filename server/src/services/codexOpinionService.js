@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v7';
+const MODEL_VERSION = 'codex-book-v8';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -1080,6 +1080,82 @@ function totalsMarkets(rows) {
   }).sort((a, b) => a.line - b.line);
 }
 
+function totalsRowsAt(rows, mode) {
+  const byKey = new Map();
+  for (const row of rows.filter((r) => r.market === 'totals' && r.price > 1 && totalsOutcome(r) && isStandardTotalsLine(totalsLine(r)))) {
+    const key = `${row.bookmaker}|${totalsLine(row)}|${totalsOutcome(row)}`;
+    const prev = byKey.get(key);
+    const shouldTake = !prev || (mode === 'earliest'
+      ? String(row.taken_at) < String(prev.taken_at)
+      : String(row.taken_at) > String(prev.taken_at));
+    if (shouldTake) byKey.set(key, row);
+  }
+  return [...byKey.values()];
+}
+
+function totalsConsensusAt(rows, mode) {
+  const byLineBook = new Map();
+  for (const row of totalsRowsAt(rows, mode)) {
+    const line = totalsLine(row);
+    const key = `${line}|${row.bookmaker}`;
+    if (!byLineBook.has(key)) byLineBook.set(key, { line, bookmaker: row.bookmaker, prices: {}, times: [] });
+    byLineBook.get(key).prices[totalsOutcome(row)] = row.price;
+    byLineBook.get(key).times.push(row.taken_at);
+  }
+
+  const byLine = new Map();
+  for (const book of byLineBook.values()) {
+    if (!(book.prices.over > 1 && book.prices.under > 1)) continue;
+    const implied = demarginate(book.prices);
+    if (!byLine.has(book.line)) byLine.set(book.line, []);
+    byLine.get(book.line).push({ ...book, implied });
+  }
+
+  return [...byLine.entries()].map(([line, books]) => ({
+    line,
+    books: books.length,
+    consensus: normalize({ over: median(books.map((b) => b.implied.over)), under: 1 - median(books.map((b) => b.implied.over)) }),
+    taken_at: books.flatMap((b) => b.times).sort().at(mode === 'earliest' ? 0 : -1) || null,
+  })).sort((a, b) => a.line - b.line);
+}
+
+function totalsMarketMovement(rows) {
+  const opening = totalsConsensusAt(rows, 'earliest');
+  const latest = totalsConsensusAt(rows, 'latest');
+  const lines = [];
+  for (const current of latest) {
+    const initial = opening.find((item) => item.line === current.line);
+    if (!initial || initial.taken_at === current.taken_at) continue;
+    if (initial.books < 3 || current.books < 3) continue;
+    const delta = round(current.consensus.over - initial.consensus.over);
+    lines.push({
+      line: current.line,
+      opening_at: initial.taken_at,
+      latest_at: current.taken_at,
+      opening_books: initial.books,
+      latest_books: current.books,
+      opening_over: initial.consensus.over,
+      latest_over: current.consensus.over,
+      delta_over: delta,
+      abs_delta: round(Math.abs(delta)),
+      direction: delta >= 0 ? 'over' : 'under',
+    });
+  }
+  const material = lines.filter((line) => line.abs_delta >= 0.012);
+  if (!material.length) return { available: false, lines };
+  const leader = material.slice().sort((a, b) => b.abs_delta - a.abs_delta)[0];
+  return {
+    available: true,
+    lines,
+    material_lines: material,
+    leader_line: leader.line,
+    direction: leader.direction,
+    max_delta: leader.abs_delta,
+    latest_at: latestTimestamp(...material.map((line) => line.latest_at)),
+    opening_at: material.map((line) => line.opening_at).sort()[0] || null,
+  };
+}
+
 function totalsDepthWeight(books) {
   if (!books) return 1;
   return round(clamp(0.55 + 0.45 * (Math.min(books, 8) / 8), 0.55, 1));
@@ -1197,6 +1273,27 @@ function applyTournamentGoalsTotals(lines, goalsContext) {
       lean: probs.over >= probs.under ? 'over' : 'under',
       tournament_goals_adjusted: true,
       tournament_goals_delta: round(delta),
+    };
+  });
+}
+
+function applyTotalsMarketMovement(lines, movement) {
+  if (!movement?.available) return lines;
+  return lines.map((line) => {
+    const signal = movement.material_lines?.find((item) => item.line === line.line);
+    if (!signal) return { ...line, totals_market_movement_delta: 0 };
+    const depthWeight = line.synthetic ? 0 : clamp((Number(line.books || 0) / 8), 0.35, 1);
+    const delta = clamp(Number(signal.delta_over || 0) * 0.14 * depthWeight, -0.012, 0.012);
+    if (Math.abs(delta) < 0.0008) return { ...line, totals_market_movement_delta: 0 };
+    const over = clamp(line.probs.over + delta, 0.05, 0.95);
+    const probs = normalize({ over, under: 1 - over });
+    return {
+      ...line,
+      probs,
+      fair_odds: { over: impliedOdds(probs.over), under: impliedOdds(probs.under) },
+      lean: probs.over >= probs.under ? 'over' : 'under',
+      totals_market_movement_adjusted: true,
+      totals_market_movement_delta: round(delta),
     };
   });
 }
@@ -1376,6 +1473,7 @@ function changeSummary(previous, sources) {
   if (sources.latest_team_form_match_at && sources.latest_team_form_match_at > previous.generated_at) changed.push('forme tournoi');
   if (sources.latest_tournament_goals_at && sources.latest_tournament_goals_at > previous.generated_at) changed.push('rythme buts tournoi');
   if (sources.latest_market_movement_at && sources.latest_market_movement_at > previous.generated_at) changed.push('mouvement marché');
+  if (sources.latest_totals_market_movement_at && sources.latest_totals_market_movement_at > previous.generated_at) changed.push('mouvement O/U');
   if (sources.live_score_changed) changed.push('score live');
   return changed.length
     ? `Nouveaux signaux depuis le dernier avis : ${changed.join(', ')}.`
@@ -1443,6 +1541,11 @@ function marketMovementSummary(match, movement) {
   return ` Mouvement marché surveillé : le dernier consensus a bougé vers ${teamName(match, movement.leader)} de ${(movement.max_delta * 100).toFixed(1)} points depuis l'ouverture.`;
 }
 
+function totalsMovementSummary(movement) {
+  if (!movement?.available || movement.max_delta < 0.018) return '';
+  return ` Mouvement O/U surveillé : la ligne ${movement.leader_line} glisse vers ${movement.direction === 'over' ? 'Over' : 'Under'} de ${(movement.max_delta * 100).toFixed(1)} points.`;
+}
+
 function totalsDepthSummary(totals) {
   const adjusted = totals.filter((line) => line.depth_adjusted);
   if (!adjusted.length) return '';
@@ -1457,7 +1560,7 @@ function tournamentGoalsSummary(goalsContext, totals) {
   return ` Rythme buts tournoi intégré : ${goalsContext.avg_goals} buts/match sur ${goalsContext.matches} matchs, signal ${dir} appliqué prudemment aux lignes O/U.`;
 }
 
-function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext) {
+function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement) {
   const ordered = H2H_OUTCOMES.slice().sort((a, b) => h2h[b] - h2h[a]);
   const fav = ordered[0];
   const favName = teamName(match, fav);
@@ -1474,12 +1577,13 @@ function summarize(match, h2h, totals, forced, conf, sources, calibration, teamF
   const form = teamFormSummary(match, teamForm);
   const liveText = liveContextSummary(match, live);
   const movement = marketMovementSummary(match, marketMovement);
+  const totalsMove = totalsMovementSummary(totalsMovement);
   const depth = totalsDepthSummary(totals);
   const goalsPace = tournamentGoalsSummary(goalsContext, totals);
   const learned = calibrationSummary(calibration, regimeCalibration);
   return {
     headline: `${favName} ${h2h[fav] >= 0.5 ? 'net favori Codex' : 'léger avantage Codex'}`,
-    summary: `${lead}${ou}${liveText}${movement} ${data}${form}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
+    summary: `${lead}${ou}${liveText}${movement}${totalsMove} ${data}${form}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
   };
 }
 
@@ -1730,6 +1834,7 @@ export function generateCodexOpinion(db, matchId) {
 
   const market = h2hMarket(odds);
   const marketMovement = h2hMarketMovement(odds);
+  const totalsMovement = totalsMarketMovement(odds);
   const base = market?.consensus || { home: 0.39, draw: 0.29, away: 0.32 };
   const suggestion = pickSuggestion(suggestions);
   let h2h = suggestion ? blend(base, targetFromSuggestion(base, suggestion), 0.18) : base;
@@ -1747,15 +1852,18 @@ export function generateCodexOpinion(db, matchId) {
     ? applyTotalsDepthAdjustment(rawTotals)
     : syntheticTotalsFromH2h(h2h, scorecard);
   const totals = applyLiveTotalsAdjustment(
-    applyTotalsCalibration(
-      applyTournamentGoalsTotals(
-        applyTeamFormTotals(
-          adjustTotals(totalsInput, scorecard),
-          teamForm
+    applyTotalsMarketMovement(
+      applyTotalsCalibration(
+        applyTournamentGoalsTotals(
+          applyTeamFormTotals(
+            adjustTotals(totalsInput, scorecard),
+            teamForm
+          ),
+          goalsContext
         ),
-        goalsContext
+        calibration
       ),
-      calibration
+      totalsMovement
     ),
     live
   );
@@ -1822,6 +1930,7 @@ export function generateCodexOpinion(db, matchId) {
       totals_delta: teamForm.totals_delta,
     },
     market_movement: marketMovement,
+    totals_market_movement: totalsMovement,
     tournament_goals: goalsContext,
     totals_depth: totals.map((t) => [
       t.line,
@@ -1830,6 +1939,7 @@ export function generateCodexOpinion(db, matchId) {
       !!t.depth_adjusted,
       t.totals_calibration_delta ?? 0,
       t.tournament_goals_delta ?? 0,
+      t.totals_market_movement_delta ?? 0,
     ]),
     forced_choice: {
       market: forced.market,
@@ -1852,16 +1962,18 @@ export function generateCodexOpinion(db, matchId) {
     latest_team_form_match_at: teamForm.latest_match_at,
     latest_tournament_goals_at: goalsContext.available ? goalsContext.latest_match_at : null,
     latest_market_movement_at: marketMovement.available ? marketMovement.latest_at : null,
+    latest_totals_market_movement_at: totalsMovement.available ? totalsMovement.latest_at : null,
     latest_live_at: live.active ? live.updated_at : null,
     live_score_changed: liveScoreChanged,
   };
   const changes = changeSummary(previous, sources);
-  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext);
+  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement);
   const diagnostics = {
     model_version: MODEL_VERSION,
     h2h_anchor: market ? 'market_demarginated_median_plus_team_form_power_rating_regime_calibrated' : 'conservative_prior_plus_team_form_power_rating_regime_calibrated',
     h2h_books: market?.books || 0,
     market_movement: marketMovement,
+    totals_market_movement: totalsMovement,
     totals_lines: totals.map((t) => ({
       line: t.line,
       books: t.books,
@@ -1872,6 +1984,8 @@ export function generateCodexOpinion(db, matchId) {
       totals_line_calibration_delta: t.totals_line_calibration_delta ?? 0,
       tournament_goals_delta: t.tournament_goals_delta ?? 0,
       tournament_goals_adjusted: !!t.tournament_goals_adjusted,
+      totals_market_movement_delta: t.totals_market_movement_delta ?? 0,
+      totals_market_movement_adjusted: !!t.totals_market_movement_adjusted,
     })),
     forced_choice: {
       choice_score: forced.choice_score,

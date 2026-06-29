@@ -67,7 +67,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v7');
+  assert.equal(opinion.model_version, 'codex-book-v8');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -336,6 +336,37 @@ test('generateCodexOpinion : calibre les lignes Over Under par ligne standard', 
   assert.equal(opinion.diagnostics.calibration.totals.by_line['3.5'].n, 9);
   assert.ok(line.totals_line_calibration_delta > 0);
   assert.ok(line.probs.over > 0.3);
+});
+
+test('generateCodexOpinion : intègre le mouvement de marché Over Under', () => {
+  const db = freshDb();
+  for (const [outcome, price] of [['home', 1.90], ['draw', 3.45], ['away', 4.50]]) {
+    db.prepare(`
+      INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+      VALUES (1, 'book-h2h', 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+    `).run({ outcome, price });
+  }
+  for (const bookmaker of ['book-a', 'book-b', 'book-c']) {
+    for (const [takenAt, over, under] of [
+      ['2026-06-10T08:00:00Z', 2.20, 1.70],
+      ['2026-06-11T08:00:00Z', 1.78, 2.12],
+    ]) {
+      for (const [side, price] of [['over', over], ['under', under]]) {
+        db.prepare(`
+          INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, point, price, taken_at)
+          VALUES (1, @bookmaker, 'totals', @outcome, 2.5, @price, @taken_at)
+        `).run({ bookmaker, outcome: `${side}_2.5`, price, taken_at: takenAt });
+      }
+    }
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const line = opinion.totals.find((item) => item.line === 2.5);
+
+  assert.equal(opinion.diagnostics.totals_market_movement.available, true);
+  assert.equal(opinion.diagnostics.totals_market_movement.direction, 'over');
+  assert.ok(line.totals_market_movement_delta > 0);
+  assert.match(opinion.summary, /Mouvement O\/U surveillé/);
 });
 
 test('generateCodexOpinion : la calibration n’utilise pas le résultat du match courant', () => {
