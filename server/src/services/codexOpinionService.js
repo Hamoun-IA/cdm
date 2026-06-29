@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v6';
+const MODEL_VERSION = 'codex-book-v7';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -109,7 +109,7 @@ function forcedMarketBucket(market) {
   return 'other';
 }
 
-function latestPrematchCodexOpinions(db, excludedMatchId) {
+function latestPrematchCodexOpinions(db, excludedMatchId, cutoffUtc = null) {
   const rows = db.prepare(`
     SELECT co.*, m.stage, m.kickoff_utc, m.home_score, m.away_score, m.updated_at
     FROM codex_opinions co
@@ -119,8 +119,9 @@ function latestPrematchCodexOpinions(db, excludedMatchId) {
       AND m.home_score IS NOT NULL
       AND m.away_score IS NOT NULL
       AND co.generated_at < m.kickoff_utc
+      AND (@cutoffUtc IS NULL OR m.kickoff_utc < @cutoffUtc)
     ORDER BY co.match_id, co.generated_at DESC, co.id DESC
-  `).all({ excludedMatchId: Number(excludedMatchId) || -1 });
+  `).all({ excludedMatchId: Number(excludedMatchId) || -1, cutoffUtc });
 
   const seen = new Set();
   const latest = [];
@@ -209,8 +210,36 @@ function finalizedRegimeBuckets(buckets) {
   }));
 }
 
-function historicalCalibration(db, excludedMatchId) {
-  const rows = latestPrematchCodexOpinions(db, excludedMatchId);
+function emptyTotalsBucket() {
+  return { n: 0, effective_n: 0, pred_over: 0, actual_over: 0, brier: 0 };
+}
+
+function addTotalsSample(bucket, predOver, actualOver, rowWeight) {
+  bucket.n += 1;
+  bucket.effective_n += rowWeight;
+  bucket.pred_over += predOver * rowWeight;
+  bucket.actual_over += (actualOver ? 1 : 0) * rowWeight;
+  bucket.brier += ((predOver - (actualOver ? 1 : 0)) ** 2) * rowWeight;
+}
+
+function finalizedTotalsLineBuckets(buckets) {
+  return Object.fromEntries([...buckets.entries()].map(([key, bucket]) => {
+    const predicted = bucket.effective_n ? round(bucket.pred_over / bucket.effective_n) : null;
+    const observed = bucket.effective_n ? round(bucket.actual_over / bucket.effective_n) : null;
+    return [key, {
+      n: bucket.n,
+      effective_n: round(bucket.effective_n, 2),
+      predicted_over_rate: predicted,
+      observed_over_rate: observed,
+      bias_over: bucket.effective_n ? round(observed - predicted) : 0,
+      weight: learningWeight(bucket.effective_n, 0.16, 12),
+      brier_score: bucket.effective_n ? round(bucket.brier / bucket.effective_n) : null,
+    }];
+  }));
+}
+
+function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
+  const rows = latestPrematchCodexOpinions(db, excludedMatchId, cutoffUtc);
   const h2hPred = { home: 0, draw: 0, away: 0 };
   const h2hActual = { home: 0, draw: 0, away: 0 };
   const regimeBuckets = new Map();
@@ -231,6 +260,8 @@ function historicalCalibration(db, excludedMatchId) {
   let totalsEffectiveN = 0;
   let totalsPredOver = 0;
   let totalsActualOver = 0;
+  let totalsBrier = 0;
+  const totalsLineBuckets = new Map();
   let latestResultAt = null;
 
   rows.forEach((row, index) => {
@@ -291,10 +322,17 @@ function historicalCalibration(db, excludedMatchId) {
         const point = Number(line.line);
         const predOver = Number(line.probs?.over);
         if (!Number.isFinite(point) || !Number.isFinite(predOver) || goals === point) continue;
+        if (!isStandardTotalsLine(point)) continue;
+        const actualOver = goals > point;
         totalsN += 1;
         totalsEffectiveN += rowWeight;
         totalsPredOver += predOver * rowWeight;
-        totalsActualOver += (goals > point ? 1 : 0) * rowWeight;
+        totalsActualOver += (actualOver ? 1 : 0) * rowWeight;
+        totalsBrier += ((predOver - (actualOver ? 1 : 0)) ** 2) * rowWeight;
+        const key = String(point);
+        const bucket = totalsLineBuckets.get(key) || emptyTotalsBucket();
+        addTotalsSample(bucket, predOver, actualOver, rowWeight);
+        totalsLineBuckets.set(key, bucket);
       }
     }
 
@@ -336,6 +374,8 @@ function historicalCalibration(db, excludedMatchId) {
       observed_over_rate: totalsActualAvg,
       bias_over: totalsN ? round(totalsActualAvg - totalsPredAvg) : 0,
       weight: learningWeight(totalsEffectiveN, 0.18, 24),
+      brier_score: totalsEffectiveN ? round(totalsBrier / totalsEffectiveN) : null,
+      by_line: finalizedTotalsLineBuckets(totalsLineBuckets),
     },
     forced: {
       n: forcedN,
@@ -413,15 +453,22 @@ function applyRegimeCalibration(probs, calibration) {
 function applyTotalsCalibration(lines, calibration) {
   const totals = calibration?.totals;
   if (!totals?.n || !totals.weight) return lines;
-  const delta = calibrationDelta(totals.bias_over, totals.weight, 0.035);
   return lines.map((line) => {
-    const over = clamp(line.probs.over + delta, 0.05, 0.95);
+    const globalDelta = calibrationDelta(totals.bias_over, totals.weight, 0.028);
+    const lineBucket = totals.by_line?.[String(line.line)];
+    const lineDelta = lineBucket?.effective_n >= 7 && lineBucket.weight
+      ? calibrationDelta(lineBucket.bias_over, lineBucket.weight, 0.022)
+      : 0;
+    const over = clamp(line.probs.over + globalDelta + lineDelta, 0.05, 0.95);
     const probs = normalize({ over, under: 1 - over });
     return {
       ...line,
       probs,
       fair_odds: { over: impliedOdds(probs.over), under: impliedOdds(probs.under) },
       lean: probs.over >= probs.under ? 'over' : 'under',
+      totals_calibration_delta: round(globalDelta + lineDelta),
+      totals_global_calibration_delta: round(globalDelta),
+      totals_line_calibration_delta: round(lineDelta),
     };
   });
 }
@@ -1054,6 +1101,106 @@ function applyTotalsDepthAdjustment(lines) {
   });
 }
 
+function baselineOverRateForLine(line) {
+  const known = {
+    1.5: 0.72,
+    2.5: 0.5,
+    3.5: 0.32,
+    4.5: 0.18,
+  };
+  if (known[line] != null) return known[line];
+  return clamp(0.5 - (Number(line) - 2.5) * 0.18, 0.12, 0.86);
+}
+
+function tournamentGoalsContext(db, match) {
+  if (!match?.kickoff_utc) return { available: false };
+  const rows = db.prepare(`
+    SELECT id, stage, kickoff_utc, home_score + away_score AS goals
+    FROM matches
+    WHERE id != @matchId
+      AND status = 'FINISHED'
+      AND home_score IS NOT NULL
+      AND away_score IS NOT NULL
+      AND kickoff_utc < @cutoffUtc
+    ORDER BY kickoff_utc
+  `).all({ matchId: match.id, cutoffUtc: match.kickoff_utc });
+
+  if (rows.length < 8) {
+    return {
+      available: false,
+      matches: rows.length,
+      latest_match_at: latestTimestamp(...rows.map((r) => r.kickoff_utc)),
+    };
+  }
+
+  let weightedGoals = 0;
+  let weightTotal = 0;
+  const lineBuckets = new Map();
+  const trackedLines = [1.5, 2.5, 3.5, 4.5];
+  rows.forEach((row, index) => {
+    const recency = rows.length <= 1 ? 1 : 0.72 + 0.28 * ((index + 1) / rows.length);
+    const goals = Number(row.goals);
+    weightedGoals += goals * recency;
+    weightTotal += recency;
+    for (const line of trackedLines) {
+      const bucket = lineBuckets.get(String(line)) || { n: 0, effective_n: 0, over: 0 };
+      bucket.n += 1;
+      bucket.effective_n += recency;
+      bucket.over += (goals > line ? 1 : 0) * recency;
+      lineBuckets.set(String(line), bucket);
+    }
+  });
+
+  const avgGoals = weightedGoals / weightTotal;
+  const sampleWeight = rows.length / (rows.length + 32);
+  const paceDelta = clamp((avgGoals - 2.65) * 0.014 * sampleWeight, -0.012, 0.012);
+  const byLine = Object.fromEntries([...lineBuckets.entries()].map(([key, bucket]) => {
+    const line = Number(key);
+    const overRate = bucket.effective_n ? bucket.over / bucket.effective_n : 0;
+    const lineSampleWeight = bucket.n / (bucket.n + 30);
+    const lineDelta = clamp((overRate - baselineOverRateForLine(line)) * 0.075 * lineSampleWeight, -0.018, 0.018);
+    return [key, {
+      n: bucket.n,
+      effective_n: round(bucket.effective_n, 2),
+      observed_over_rate: round(overRate),
+      baseline_over_rate: baselineOverRateForLine(line),
+      sample_weight: round(lineSampleWeight),
+      delta: round(lineDelta),
+    }];
+  }));
+
+  return {
+    available: true,
+    matches: rows.length,
+    avg_goals: round(avgGoals, 2),
+    sample_weight: round(sampleWeight),
+    pace_delta: round(paceDelta),
+    by_line: byLine,
+    latest_match_at: latestTimestamp(...rows.map((r) => r.kickoff_utc)),
+  };
+}
+
+function applyTournamentGoalsTotals(lines, goalsContext) {
+  if (!goalsContext?.available) return lines;
+  return lines.map((line) => {
+    const lineStats = goalsContext.by_line?.[String(line.line)];
+    const lineDelta = lineStats?.n >= 12 ? Number(lineStats.delta || 0) : 0;
+    const depthMultiplier = line.synthetic ? 1.25 : clamp(1 - Number(line.market_depth_weight ?? 1) * 0.35, 0.65, 1);
+    const delta = clamp((Number(goalsContext.pace_delta || 0) + lineDelta) * depthMultiplier, -0.024, 0.024);
+    if (Math.abs(delta) < 0.0001) return { ...line, tournament_goals_delta: 0 };
+    const over = clamp(line.probs.over + delta, 0.05, 0.95);
+    const probs = normalize({ over, under: 1 - over });
+    return {
+      ...line,
+      probs,
+      fair_odds: { over: impliedOdds(probs.over), under: impliedOdds(probs.under) },
+      lean: probs.over >= probs.under ? 'over' : 'under',
+      tournament_goals_adjusted: true,
+      tournament_goals_delta: round(delta),
+    };
+  });
+}
+
 function pickSuggestion(suggestions) {
   return (suggestions || [])
     .filter((s) => s.market === 'h2h' && H2H_OUTCOMES.includes(s.outcome) && s.est_probability > 0)
@@ -1227,6 +1374,7 @@ function changeSummary(previous, sources) {
   if (sources.latest_odds_at && sources.latest_odds_at > previous.generated_at) changed.push('cotes');
   if (sources.latest_calibration_result_at && sources.latest_calibration_result_at > previous.generated_at) changed.push('résultats précédents');
   if (sources.latest_team_form_match_at && sources.latest_team_form_match_at > previous.generated_at) changed.push('forme tournoi');
+  if (sources.latest_tournament_goals_at && sources.latest_tournament_goals_at > previous.generated_at) changed.push('rythme buts tournoi');
   if (sources.latest_market_movement_at && sources.latest_market_movement_at > previous.generated_at) changed.push('mouvement marché');
   if (sources.live_score_changed) changed.push('score live');
   return changed.length
@@ -1301,7 +1449,15 @@ function totalsDepthSummary(totals) {
   return ' Les lignes de buts peu profondes sont volontairement amorties avant le choix forcé.';
 }
 
-function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration) {
+function tournamentGoalsSummary(goalsContext, totals) {
+  if (!goalsContext?.available) return '';
+  const adjusted = totals.filter((line) => Math.abs(Number(line.tournament_goals_delta || 0)) >= 0.004);
+  if (!adjusted.length) return '';
+  const dir = adjusted.reduce((s, line) => s + Number(line.tournament_goals_delta || 0), 0) >= 0 ? 'plus ouvert' : 'plus fermé';
+  return ` Rythme buts tournoi intégré : ${goalsContext.avg_goals} buts/match sur ${goalsContext.matches} matchs, signal ${dir} appliqué prudemment aux lignes O/U.`;
+}
+
+function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext) {
   const ordered = H2H_OUTCOMES.slice().sort((a, b) => h2h[b] - h2h[a]);
   const fav = ordered[0];
   const favName = teamName(match, fav);
@@ -1319,10 +1475,11 @@ function summarize(match, h2h, totals, forced, conf, sources, calibration, teamF
   const liveText = liveContextSummary(match, live);
   const movement = marketMovementSummary(match, marketMovement);
   const depth = totalsDepthSummary(totals);
+  const goalsPace = tournamentGoalsSummary(goalsContext, totals);
   const learned = calibrationSummary(calibration, regimeCalibration);
   return {
     headline: `${favName} ${h2h[fav] >= 0.5 ? 'net favori Codex' : 'léger avantage Codex'}`,
-    summary: `${lead}${ou}${liveText}${movement} ${data}${form}${depth}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
+    summary: `${lead}${ou}${liveText}${movement} ${data}${form}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
   };
 }
 
@@ -1566,8 +1723,9 @@ export function generateCodexOpinion(db, matchId) {
   const previous = latestCodexOpinion(db, matchId);
   const suggestions = db.prepare('SELECT * FROM suggestions WHERE match_id = ? ORDER BY created_at DESC').all(matchId);
   const odds = latestOddsRows(db, matchId);
-  const calibration = historicalCalibration(db, matchId);
+  const calibration = historicalCalibration(db, matchId, match.kickoff_utc);
   const teamForm = teamTournamentForm(db, match);
+  const goalsContext = tournamentGoalsContext(db, match);
   const live = liveContext(match);
 
   const market = h2hMarket(odds);
@@ -1590,9 +1748,12 @@ export function generateCodexOpinion(db, matchId) {
     : syntheticTotalsFromH2h(h2h, scorecard);
   const totals = applyLiveTotalsAdjustment(
     applyTotalsCalibration(
-      applyTeamFormTotals(
-        adjustTotals(totalsInput, scorecard),
-        teamForm
+      applyTournamentGoalsTotals(
+        applyTeamFormTotals(
+          adjustTotals(totalsInput, scorecard),
+          teamForm
+        ),
+        goalsContext
       ),
       calibration
     ),
@@ -1629,7 +1790,13 @@ export function generateCodexOpinion(db, matchId) {
       h2h: { n: calibration.h2h.n, effective_n: calibration.h2h.effective_n, bias: calibration.h2h.bias, weight: calibration.h2h.weight },
       h2h_regimes: calibration.h2h_regimes,
       applied_regime: regimeCalibration.applied,
-      totals: { n: calibration.totals.n, effective_n: calibration.totals.effective_n, bias_over: calibration.totals.bias_over, weight: calibration.totals.weight },
+      totals: {
+        n: calibration.totals.n,
+        effective_n: calibration.totals.effective_n,
+        bias_over: calibration.totals.bias_over,
+        weight: calibration.totals.weight,
+        by_line: calibration.totals.by_line,
+      },
       forced: { n: calibration.forced.n, effective_n: calibration.forced.effective_n, hit_rate: calibration.forced.hit_rate, by_market: calibration.forced.by_market },
     },
     team_form: {
@@ -1655,7 +1822,15 @@ export function generateCodexOpinion(db, matchId) {
       totals_delta: teamForm.totals_delta,
     },
     market_movement: marketMovement,
-    totals_depth: totals.map((t) => [t.line, t.books, t.market_depth_weight ?? 1, !!t.depth_adjusted]),
+    tournament_goals: goalsContext,
+    totals_depth: totals.map((t) => [
+      t.line,
+      t.books,
+      t.market_depth_weight ?? 1,
+      !!t.depth_adjusted,
+      t.totals_calibration_delta ?? 0,
+      t.tournament_goals_delta ?? 0,
+    ]),
     forced_choice: {
       market: forced.market,
       selection: forced.selection,
@@ -1675,12 +1850,13 @@ export function generateCodexOpinion(db, matchId) {
     latest_odds_at: latestTimestamp(...odds.map((o) => o.taken_at)),
     latest_calibration_result_at: calibration.latest_result_at,
     latest_team_form_match_at: teamForm.latest_match_at,
+    latest_tournament_goals_at: goalsContext.available ? goalsContext.latest_match_at : null,
     latest_market_movement_at: marketMovement.available ? marketMovement.latest_at : null,
     latest_live_at: live.active ? live.updated_at : null,
     live_score_changed: liveScoreChanged,
   };
   const changes = changeSummary(previous, sources);
-  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration);
+  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext);
   const diagnostics = {
     model_version: MODEL_VERSION,
     h2h_anchor: market ? 'market_demarginated_median_plus_team_form_power_rating_regime_calibrated' : 'conservative_prior_plus_team_form_power_rating_regime_calibrated',
@@ -1692,6 +1868,10 @@ export function generateCodexOpinion(db, matchId) {
       synthetic: t.synthetic,
       market_depth_weight: t.market_depth_weight ?? 1,
       depth_adjusted: !!t.depth_adjusted,
+      totals_calibration_delta: t.totals_calibration_delta ?? 0,
+      totals_line_calibration_delta: t.totals_line_calibration_delta ?? 0,
+      tournament_goals_delta: t.tournament_goals_delta ?? 0,
+      tournament_goals_adjusted: !!t.tournament_goals_adjusted,
     })),
     forced_choice: {
       choice_score: forced.choice_score,
@@ -1704,6 +1884,7 @@ export function generateCodexOpinion(db, matchId) {
     sources,
     calibration,
     regime_calibration: regimeCalibration.applied,
+    tournament_goals: goalsContext,
     team_form: teamForm,
     live_context: live,
   };

@@ -67,7 +67,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v6');
+  assert.equal(opinion.model_version, 'codex-book-v7');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -126,6 +126,32 @@ test('generateCodexOpinion : amortit les lignes Over Under peu profondes', () =>
   assert.ok(line.probs.over < 0.72);
   assert.ok(line.probs.over > 0.6);
   assert.match(opinion.summary, /peu profondes/);
+});
+
+test('generateCodexOpinion : ajuste les buts avec le rythme réel du tournoi', () => {
+  const baselineDb = freshDb();
+  const baseline = generateCodexOpinion(baselineDb, 1);
+
+  const db = freshDb();
+  db.prepare("INSERT INTO teams (id, fifa_code, name, group_code) VALUES (3,'TST','Témoin A','A'), (4,'TSB','Témoin B','A')").run();
+  for (let id = 2; id <= 13; id++) {
+    insertTeamResult(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      home: 3,
+      away: 4,
+      homeScore: 2,
+      awayScore: 2,
+    });
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+
+  assert.equal(opinion.diagnostics.tournament_goals.available, true);
+  assert.ok(opinion.diagnostics.tournament_goals.avg_goals > 3.5);
+  assert.ok(opinion.totals[0].tournament_goals_delta > 0);
+  assert.ok(opinion.totals[0].probs.over > baseline.totals[0].probs.over);
+  assert.match(opinion.summary, /Rythme buts tournoi intégré/);
 });
 
 test('generateCodexOpinion : conserve l’historique et détecte une relance sans changement matériel', () => {
@@ -240,12 +266,12 @@ test('generateCodexOpinion : le choix forcé suit le scénario le plus probable,
 
 test('generateCodexOpinion : affine les probabilités avec les avis pré-match déjà clos', () => {
   const db = freshDb();
-  insertFinishedMatch(db, { id: 2, kickoff: '2026-06-12T19:00:00Z', homeScore: 2, awayScore: 0 });
-  insertFinishedMatch(db, { id: 3, kickoff: '2026-06-13T19:00:00Z', homeScore: 1, awayScore: 1 });
-  insertFinishedMatch(db, { id: 4, kickoff: '2026-06-14T19:00:00Z', homeScore: 1, awayScore: 0 });
-  insertHistoricalOpinion(db, { matchId: 2, generatedAt: '2026-06-12T08:00:00Z' });
-  insertHistoricalOpinion(db, { matchId: 3, generatedAt: '2026-06-13T08:00:00Z' });
-  insertHistoricalOpinion(db, { matchId: 4, generatedAt: '2026-06-14T08:00:00Z' });
+  insertFinishedMatch(db, { id: 2, kickoff: '2026-06-08T19:00:00Z', homeScore: 2, awayScore: 0 });
+  insertFinishedMatch(db, { id: 3, kickoff: '2026-06-09T19:00:00Z', homeScore: 1, awayScore: 1 });
+  insertFinishedMatch(db, { id: 4, kickoff: '2026-06-10T19:00:00Z', homeScore: 1, awayScore: 0 });
+  insertHistoricalOpinion(db, { matchId: 2, generatedAt: '2026-06-08T08:00:00Z' });
+  insertHistoricalOpinion(db, { matchId: 3, generatedAt: '2026-06-09T08:00:00Z' });
+  insertHistoricalOpinion(db, { matchId: 4, generatedAt: '2026-06-10T08:00:00Z' });
 
   const opinion = generateCodexOpinion(db, 1);
 
@@ -262,13 +288,13 @@ test('generateCodexOpinion : applique une calibration par régime quand le biais
   for (let id = 2; id <= 10; id++) {
     insertFinishedMatch(db, {
       id,
-      kickoff: `2026-06-${String(10 + id).padStart(2, '0')}T19:00:00Z`,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
       homeScore: 1,
       awayScore: 1,
     });
     insertHistoricalOpinion(db, {
       matchId: id,
-      generatedAt: `2026-06-${String(10 + id).padStart(2, '0')}T08:00:00Z`,
+      generatedAt: '2026-06-10T00:00:00Z',
       modelVersion: 'codex-book-v5',
       probabilities: { home: 0.39, draw: 0.29, away: 0.32 },
       forcedSelection: 'home',
@@ -281,6 +307,35 @@ test('generateCodexOpinion : applique une calibration par régime quand le biais
   assert.ok(opinion.diagnostics.regime_calibration.deltas.draw > 0);
   assert.ok(opinion.probabilities.draw > 0.33);
   assert.match(opinion.summary, /Calibration par régime active/);
+});
+
+test('generateCodexOpinion : calibre les lignes Over Under par ligne standard', () => {
+  const db = freshDb();
+  db.prepare("INSERT INTO teams (id, fifa_code, name, group_code) VALUES (3,'TST','Témoin A','A'), (4,'TSB','Témoin B','A')").run();
+  insertMarket(db);
+  for (let id = 2; id <= 10; id++) {
+    insertTeamResult(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      home: 3,
+      away: 4,
+      homeScore: 3,
+      awayScore: 1,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-10T00:00:00Z',
+      modelVersion: 'codex-book-v6',
+      totals: [{ line: 3.5, probs: { over: 0.25, under: 0.75 }, fair_odds: { over: 4, under: 1.33 }, synthetic: false }],
+    });
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const line = opinion.totals.find((item) => item.line === 3.5);
+
+  assert.equal(opinion.diagnostics.calibration.totals.by_line['3.5'].n, 9);
+  assert.ok(line.totals_line_calibration_delta > 0);
+  assert.ok(line.probs.over > 0.3);
 });
 
 test('generateCodexOpinion : la calibration n’utilise pas le résultat du match courant', () => {
