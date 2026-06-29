@@ -67,13 +67,13 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v5');
+  assert.equal(opinion.model_version, 'codex-book-v6');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_power_rating_weighted_history');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_power_rating_regime_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -257,6 +257,32 @@ test('generateCodexOpinion : affine les probabilités avec les avis pré-match d
   assert.match(opinion.summary, /3 avis pré-match clos/);
 });
 
+test('generateCodexOpinion : applique une calibration par régime quand le biais historique est exploitable', () => {
+  const db = freshDb();
+  for (let id = 2; id <= 10; id++) {
+    insertFinishedMatch(db, {
+      id,
+      kickoff: `2026-06-${String(10 + id).padStart(2, '0')}T19:00:00Z`,
+      homeScore: 1,
+      awayScore: 1,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: `2026-06-${String(10 + id).padStart(2, '0')}T08:00:00Z`,
+      modelVersion: 'codex-book-v5',
+      probabilities: { home: 0.39, draw: 0.29, away: 0.32 },
+      forcedSelection: 'home',
+    });
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+
+  assert.equal(opinion.diagnostics.regime_calibration.key, 'favorite_confidence:home:open');
+  assert.ok(opinion.diagnostics.regime_calibration.deltas.draw > 0);
+  assert.ok(opinion.probabilities.draw > 0.33);
+  assert.match(opinion.summary, /Calibration par régime active/);
+});
+
 test('generateCodexOpinion : la calibration n’utilise pas le résultat du match courant', () => {
   const db = freshDb();
   db.prepare("UPDATE matches SET status = 'FINISHED', home_score = 0, away_score = 4 WHERE id = 1").run();
@@ -353,6 +379,7 @@ function insertHistoricalOpinion(db, {
   totals = [{ line: 2.5, probs: { over: 0.7, under: 0.3 }, fair_odds: { over: 1.43, under: 3.33 }, synthetic: false }],
   forcedMarket = '1X2',
   forcedSelection = 'away',
+  modelVersion = 'codex-book-v1',
 } = {}) {
   db.prepare(`
     INSERT INTO codex_opinions (
@@ -361,12 +388,13 @@ function insertHistoricalOpinion(db, {
       probabilities_json, fair_odds_json, totals_json, diagnostics_json, change_summary, generated_at
     )
     VALUES (
-      @match_id, NULL, 'codex-book-v1', @input_hash, 'Historique test', 'Historique test',
+      @match_id, NULL, @model_version, @input_hash, 'Historique test', 'Historique test',
       @forced_pick_market, @forced_pick_selection, @forced_pick_label, 50,
       @probabilities_json, '{}', @totals_json, '{}', 'Historique test', @generated_at
     )
   `).run({
     match_id: matchId,
+    model_version: modelVersion,
     input_hash: `hist-${matchId}`,
     forced_pick_market: forcedMarket,
     forced_pick_selection: forcedSelection,

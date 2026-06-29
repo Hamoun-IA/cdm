@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v5';
+const MODEL_VERSION = 'codex-book-v6';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -136,10 +136,84 @@ function calibrationDelta(bias, weight, maxMove) {
   return clamp((Number(bias) || 0) * (Number(weight) || 0), -maxMove, maxMove);
 }
 
+function h2hRegime(probs) {
+  const favorite = H2H_OUTCOMES.reduce((acc, o) => probs[o] > probs[acc] ? o : acc, 'home');
+  const favoriteProb = Number(probs[favorite]) || 0;
+  const confidence = favoriteProb >= 0.65 ? 'strong' : favoriteProb >= 0.5 ? 'medium' : 'open';
+  return {
+    favorite,
+    confidence,
+    favorite_prob: round(favoriteProb),
+    keys: [
+      `favorite_confidence:${favorite}:${confidence}`,
+      `confidence:${confidence}`,
+      `favorite:${favorite}`,
+    ],
+  };
+}
+
+function emptyRegimeBucket() {
+  return {
+    n: 0,
+    effective_n: 0,
+    pred: { home: 0, draw: 0, away: 0 },
+    actual: { home: 0, draw: 0, away: 0 },
+    brier: 0,
+    favorite_hits: 0,
+    favorite_hit_weight: 0,
+  };
+}
+
+function addRegimeSample(buckets, key, probs, actual, rowWeight) {
+  const bucket = buckets.get(key) || emptyRegimeBucket();
+  const favorite = H2H_OUTCOMES.reduce((acc, o) => probs[o] > probs[acc] ? o : acc, 'home');
+  bucket.n += 1;
+  bucket.effective_n += rowWeight;
+  if (favorite === actual) {
+    bucket.favorite_hits += 1;
+    bucket.favorite_hit_weight += rowWeight;
+  }
+  for (const outcome of H2H_OUTCOMES) {
+    const predicted = Number(probs[outcome]);
+    const observed = outcome === actual ? 1 : 0;
+    bucket.pred[outcome] += predicted * rowWeight;
+    bucket.actual[outcome] += observed * rowWeight;
+    bucket.brier += ((predicted - observed) ** 2) * rowWeight;
+  }
+  buckets.set(key, bucket);
+}
+
+function finalizedRegimeBuckets(buckets) {
+  return Object.fromEntries([...buckets.entries()].map(([key, bucket]) => {
+    const predicted = Object.fromEntries(H2H_OUTCOMES.map((o) => [
+      o,
+      bucket.effective_n ? round(bucket.pred[o] / bucket.effective_n) : null,
+    ]));
+    const observed = Object.fromEntries(H2H_OUTCOMES.map((o) => [
+      o,
+      bucket.effective_n ? round(bucket.actual[o] / bucket.effective_n) : null,
+    ]));
+    return [key, {
+      n: bucket.n,
+      effective_n: round(bucket.effective_n, 2),
+      predicted,
+      observed,
+      bias: Object.fromEntries(H2H_OUTCOMES.map((o) => [
+        o,
+        bucket.effective_n ? round(observed[o] - predicted[o]) : 0,
+      ])),
+      weight: learningWeight(bucket.effective_n, 0.18, 14),
+      brier_score: bucket.effective_n ? round(bucket.brier / bucket.effective_n) : null,
+      favorite_hit_rate: bucket.effective_n ? round(bucket.favorite_hit_weight / bucket.effective_n) : null,
+    }];
+  }));
+}
+
 function historicalCalibration(db, excludedMatchId) {
   const rows = latestPrematchCodexOpinions(db, excludedMatchId);
   const h2hPred = { home: 0, draw: 0, away: 0 };
   const h2hActual = { home: 0, draw: 0, away: 0 };
+  const regimeBuckets = new Map();
   let h2hN = 0;
   let h2hEffectiveN = 0;
   let brier = 0;
@@ -177,6 +251,9 @@ function historicalCalibration(db, excludedMatchId) {
       if (favorite === actual) {
         favoriteHits += 1;
         favoriteHitWeight += rowWeight;
+      }
+      for (const key of h2hRegime(probs).keys) {
+        addRegimeSample(regimeBuckets, key, probs, actual, rowWeight);
       }
     }
 
@@ -251,6 +328,7 @@ function historicalCalibration(db, excludedMatchId) {
       brier_score: h2hEffectiveN ? round(brier / h2hEffectiveN) : null,
       favorite_hit_rate: h2hEffectiveN ? round(favoriteHitWeight / h2hEffectiveN) : null,
     },
+    h2h_regimes: finalizedRegimeBuckets(regimeBuckets),
     totals: {
       n: totalsN,
       effective_n: round(totalsEffectiveN, 2),
@@ -281,6 +359,55 @@ function applyHistoricalCalibration(probs, calibration) {
     );
   }
   return normalize(adjusted);
+}
+
+function regimeCalibrationLabel(key) {
+  const favoriteLabels = { home: 'favori domicile', draw: 'nul central', away: 'favori extérieur' };
+  const confidenceLabels = { open: 'match ouvert', medium: 'favori modéré', strong: 'favori fort' };
+  const parts = String(key || '').split(':');
+  if (parts[0] === 'favorite_confidence') {
+    return `${favoriteLabels[parts[1]] || parts[1]} / ${confidenceLabels[parts[2]] || parts[2]}`;
+  }
+  if (parts[0] === 'favorite') return favoriteLabels[parts[1]] || key;
+  if (parts[0] === 'confidence') return confidenceLabels[parts[1]] || key;
+  return key;
+}
+
+function regimeCalibrationCandidates(probs) {
+  const regime = h2hRegime(probs);
+  return [
+    { key: `favorite_confidence:${regime.favorite}:${regime.confidence}`, min_effective_n: 6, max_move: 0.026 },
+    { key: `confidence:${regime.confidence}`, min_effective_n: 7, max_move: 0.023 },
+    { key: `favorite:${regime.favorite}`, min_effective_n: 9, max_move: 0.02 },
+  ];
+}
+
+function applyRegimeCalibration(probs, calibration) {
+  const regimes = calibration?.h2h_regimes || {};
+  for (const candidate of regimeCalibrationCandidates(probs)) {
+    const bucket = regimes[candidate.key];
+    if (!bucket?.effective_n || bucket.effective_n < candidate.min_effective_n || !bucket.weight) continue;
+    const deltas = {};
+    const adjusted = {};
+    for (const outcome of H2H_OUTCOMES) {
+      deltas[outcome] = calibrationDelta(bucket.bias?.[outcome], bucket.weight, candidate.max_move);
+      adjusted[outcome] = clamp(probs[outcome] + deltas[outcome], 0.025, 0.94);
+    }
+    return {
+      probs: normalize(adjusted),
+      applied: {
+        key: candidate.key,
+        label: regimeCalibrationLabel(candidate.key),
+        n: bucket.n,
+        effective_n: bucket.effective_n,
+        bias: bucket.bias,
+        weight: bucket.weight,
+        max_move: candidate.max_move,
+        deltas,
+      },
+    };
+  }
+  return { probs, applied: null };
 }
 
 function applyTotalsCalibration(lines, calibration) {
@@ -1107,8 +1234,11 @@ function changeSummary(previous, sources) {
     : 'Le profil de données a changé, sans nouvel horodatage clairement postérieur au dernier avis.';
 }
 
-function calibrationSummary(calibration) {
+function calibrationSummary(calibration, regimeCalibration) {
   const n = calibration?.h2h?.n || 0;
+  const regimeText = regimeCalibration?.applied
+    ? ` Calibration par régime active (${regimeCalibration.applied.label}, n=${regimeCalibration.applied.n}), avec correction plafonnée.`
+    : '';
   if (n >= 4) {
     const hitRate = calibration.forced?.hit_rate != null
       ? `, choix forcé juste ${(calibration.forced.hit_rate * 100).toFixed(0)} % du temps`
@@ -1116,7 +1246,7 @@ function calibrationSummary(calibration) {
     const effective = calibration.h2h?.effective_n && Math.abs(calibration.h2h.effective_n - n) >= 1
       ? `, poids effectif ${calibration.h2h.effective_n}`
       : '';
-    return ` La calibration relit ${n} avis pré-match déjà clos${effective}${hitRate}; les versions anciennes et les matchs moins récents pèsent moins.`;
+    return ` La calibration relit ${n} avis pré-match déjà clos${effective}${hitRate}; les versions anciennes et les matchs moins récents pèsent moins.${regimeText}`;
   }
   if (n > 0) return ` ${n} avis pré-match clos sont suivis, mais l'échantillon reste trop court pour peser fortement.`;
   return ' Aucun historique pré-match clos ne pèse encore sur ce calcul.';
@@ -1171,7 +1301,7 @@ function totalsDepthSummary(totals) {
   return ' Les lignes de buts peu profondes sont volontairement amorties avant le choix forcé.';
 }
 
-function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement) {
+function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration) {
   const ordered = H2H_OUTCOMES.slice().sort((a, b) => h2h[b] - h2h[a]);
   const fav = ordered[0];
   const favName = teamName(match, fav);
@@ -1189,7 +1319,7 @@ function summarize(match, h2h, totals, forced, conf, sources, calibration, teamF
   const liveText = liveContextSummary(match, live);
   const movement = marketMovementSummary(match, marketMovement);
   const depth = totalsDepthSummary(totals);
-  const learned = calibrationSummary(calibration);
+  const learned = calibrationSummary(calibration, regimeCalibration);
   return {
     headline: `${favName} ${h2h[fav] >= 0.5 ? 'net favori Codex' : 'léger avantage Codex'}`,
     summary: `${lead}${ou}${liveText}${movement} ${data}${form}${depth}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
@@ -1449,6 +1579,8 @@ export function generateCodexOpinion(db, matchId) {
   h2h = applyQualitativeAdjustments(h2h, { favorite, scorecard, decision });
   h2h = applyTeamFormAdjustment(h2h, teamForm);
   h2h = applyHistoricalCalibration(h2h, calibration);
+  const regimeCalibration = applyRegimeCalibration(h2h, calibration);
+  h2h = regimeCalibration.probs;
   h2h = applyLiveH2hAdjustment(h2h, live);
   const fairOdds = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, impliedOdds(h2h[o])]));
 
@@ -1495,6 +1627,8 @@ export function generateCodexOpinion(db, matchId) {
     calibration: {
       latest_result_at: calibration.latest_result_at,
       h2h: { n: calibration.h2h.n, effective_n: calibration.h2h.effective_n, bias: calibration.h2h.bias, weight: calibration.h2h.weight },
+      h2h_regimes: calibration.h2h_regimes,
+      applied_regime: regimeCalibration.applied,
       totals: { n: calibration.totals.n, effective_n: calibration.totals.effective_n, bias_over: calibration.totals.bias_over, weight: calibration.totals.weight },
       forced: { n: calibration.forced.n, effective_n: calibration.forced.effective_n, hit_rate: calibration.forced.hit_rate, by_market: calibration.forced.by_market },
     },
@@ -1546,10 +1680,10 @@ export function generateCodexOpinion(db, matchId) {
     live_score_changed: liveScoreChanged,
   };
   const changes = changeSummary(previous, sources);
-  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement);
+  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_power_rating_weighted_history' : 'conservative_prior_plus_team_form_power_rating_weighted_history',
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_power_rating_regime_calibrated' : 'conservative_prior_plus_team_form_power_rating_regime_calibrated',
     h2h_books: market?.books || 0,
     market_movement: marketMovement,
     totals_lines: totals.map((t) => ({
@@ -1569,6 +1703,7 @@ export function generateCodexOpinion(db, matchId) {
     input_hash: hash,
     sources,
     calibration,
+    regime_calibration: regimeCalibration.applied,
     team_form: teamForm,
     live_context: live,
   };
