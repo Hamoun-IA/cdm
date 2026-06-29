@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v3';
+const MODEL_VERSION = 'codex-book-v4';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -92,9 +92,26 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
   return round(cap * (n / (n + anchor)));
 }
 
+function modelVersionLearningMultiplier(version) {
+  if (version === MODEL_VERSION || version === 'codex-book-v3') return 1;
+  if (version === 'codex-book-v2') return 0.75;
+  return 0.45;
+}
+
+function historicalOpinionWeight(row, index, total) {
+  const recency = total <= 1 ? 1 : 0.65 + 0.35 * ((index + 1) / total);
+  return round(modelVersionLearningMultiplier(row.model_version) * recency);
+}
+
+function forcedMarketBucket(market) {
+  if (market === '1X2') return '1X2';
+  if (String(market || '').startsWith('OU_')) return 'OU';
+  return 'other';
+}
+
 function latestPrematchCodexOpinions(db, excludedMatchId) {
   const rows = db.prepare(`
-    SELECT co.*, m.kickoff_utc, m.home_score, m.away_score, m.updated_at
+    SELECT co.*, m.stage, m.kickoff_utc, m.home_score, m.away_score, m.updated_at
     FROM codex_opinions co
     JOIN matches m ON m.id = co.match_id
     WHERE co.match_id != @excludedMatchId
@@ -112,7 +129,7 @@ function latestPrematchCodexOpinions(db, excludedMatchId) {
     seen.add(row.match_id);
     latest.push(row);
   }
-  return latest;
+  return latest.sort((a, b) => String(a.kickoff_utc).localeCompare(String(b.kickoff_utc)));
 }
 
 function calibrationDelta(bias, weight, maxMove) {
@@ -124,44 +141,69 @@ function historicalCalibration(db, excludedMatchId) {
   const h2hPred = { home: 0, draw: 0, away: 0 };
   const h2hActual = { home: 0, draw: 0, away: 0 };
   let h2hN = 0;
+  let h2hEffectiveN = 0;
   let brier = 0;
   let favoriteHits = 0;
+  let favoriteHitWeight = 0;
   let forcedN = 0;
   let forcedHits = 0;
+  let forcedEffectiveN = 0;
+  let forcedHitWeight = 0;
+  const forcedBuckets = {
+    '1X2': { n: 0, hits: 0, effective_n: 0, hit_weight: 0 },
+    OU: { n: 0, hits: 0, effective_n: 0, hit_weight: 0 },
+  };
   let totalsN = 0;
+  let totalsEffectiveN = 0;
   let totalsPredOver = 0;
   let totalsActualOver = 0;
   let latestResultAt = null;
 
-  for (const row of rows) {
+  rows.forEach((row, index) => {
+    const rowWeight = historicalOpinionWeight(row, index, rows.length);
     const actual = actualH2hOutcome(row);
     const probs = safeJson(row.probabilities_json, null);
     if (actual && validH2h(probs)) {
       h2hN += 1;
+      h2hEffectiveN += rowWeight;
       for (const outcome of H2H_OUTCOMES) {
         const predicted = Number(probs[outcome]);
         const observed = outcome === actual ? 1 : 0;
-        h2hPred[outcome] += predicted;
-        h2hActual[outcome] += observed;
-        brier += (predicted - observed) ** 2;
+        h2hPred[outcome] += predicted * rowWeight;
+        h2hActual[outcome] += observed * rowWeight;
+        brier += ((predicted - observed) ** 2) * rowWeight;
       }
       const favorite = H2H_OUTCOMES.reduce((acc, o) => probs[o] > probs[acc] ? o : acc, 'home');
-      if (favorite === actual) favoriteHits += 1;
+      if (favorite === actual) {
+        favoriteHits += 1;
+        favoriteHitWeight += rowWeight;
+      }
     }
 
+    let forcedVerdict = null;
     if (row.forced_pick_market === '1X2' && H2H_OUTCOMES.includes(row.forced_pick_selection)) {
-      forcedN += 1;
-      if (row.forced_pick_selection === actual) forcedHits += 1;
+      forcedVerdict = row.forced_pick_selection === actual ? 'hit' : 'miss';
     } else {
       const m = String(row.forced_pick_market || '').match(/^OU_(\d+(?:\.\d+)?)$/);
       const goals = actualGoals(row);
       if (m && Number.isFinite(goals)) {
         const line = Number(m[1]);
         const forcedActual = goals > line ? 'over' : goals < line ? 'under' : null;
-        if (forcedActual) {
-          forcedN += 1;
-          if (row.forced_pick_selection === forcedActual) forcedHits += 1;
-        }
+        if (forcedActual) forcedVerdict = row.forced_pick_selection === forcedActual ? 'hit' : 'miss';
+      }
+    }
+    if (forcedVerdict) {
+      const bucketKey = forcedMarketBucket(row.forced_pick_market);
+      const bucket = forcedBuckets[bucketKey] || (forcedBuckets[bucketKey] = { n: 0, hits: 0, effective_n: 0, hit_weight: 0 });
+      forcedN += 1;
+      forcedEffectiveN += rowWeight;
+      bucket.n += 1;
+      bucket.effective_n += rowWeight;
+      if (forcedVerdict === 'hit') {
+        forcedHits += 1;
+        forcedHitWeight += rowWeight;
+        bucket.hits += 1;
+        bucket.hit_weight += rowWeight;
       }
     }
 
@@ -173,42 +215,56 @@ function historicalCalibration(db, excludedMatchId) {
         const predOver = Number(line.probs?.over);
         if (!Number.isFinite(point) || !Number.isFinite(predOver) || goals === point) continue;
         totalsN += 1;
-        totalsPredOver += predOver;
-        totalsActualOver += goals > point ? 1 : 0;
+        totalsEffectiveN += rowWeight;
+        totalsPredOver += predOver * rowWeight;
+        totalsActualOver += (goals > point ? 1 : 0) * rowWeight;
       }
     }
 
     latestResultAt = latestTimestamp(latestResultAt, row.updated_at, row.kickoff_utc);
-  }
+  });
 
-  const h2hPredAvg = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, h2hN ? round(h2hPred[o] / h2hN) : null]));
-  const h2hActualAvg = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, h2hN ? round(h2hActual[o] / h2hN) : null]));
+  const h2hPredAvg = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, h2hEffectiveN ? round(h2hPred[o] / h2hEffectiveN) : null]));
+  const h2hActualAvg = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, h2hEffectiveN ? round(h2hActual[o] / h2hEffectiveN) : null]));
   const h2hBias = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, h2hN ? round(h2hActualAvg[o] - h2hPredAvg[o]) : 0]));
-  const totalsPredAvg = totalsN ? round(totalsPredOver / totalsN) : null;
-  const totalsActualAvg = totalsN ? round(totalsActualOver / totalsN) : null;
+  const totalsPredAvg = totalsEffectiveN ? round(totalsPredOver / totalsEffectiveN) : null;
+  const totalsActualAvg = totalsEffectiveN ? round(totalsActualOver / totalsEffectiveN) : null;
+  const forcedByMarket = Object.fromEntries(Object.entries(forcedBuckets).map(([market, bucket]) => [
+    market,
+    {
+      n: bucket.n,
+      effective_n: round(bucket.effective_n, 2),
+      hit_rate: bucket.effective_n ? round(bucket.hit_weight / bucket.effective_n) : null,
+    },
+  ]));
 
   return {
     available: h2hN > 0 || totalsN > 0,
     latest_result_at: latestResultAt,
     h2h: {
       n: h2hN,
+      effective_n: round(h2hEffectiveN, 2),
       predicted: h2hPredAvg,
       observed: h2hActualAvg,
       bias: h2hBias,
-      weight: learningWeight(h2hN),
-      brier_score: h2hN ? round(brier / h2hN) : null,
-      favorite_hit_rate: h2hN ? round(favoriteHits / h2hN) : null,
+      weight: learningWeight(h2hEffectiveN),
+      brier_score: h2hEffectiveN ? round(brier / h2hEffectiveN) : null,
+      favorite_hit_rate: h2hEffectiveN ? round(favoriteHitWeight / h2hEffectiveN) : null,
     },
     totals: {
       n: totalsN,
+      effective_n: round(totalsEffectiveN, 2),
       predicted_over_rate: totalsPredAvg,
       observed_over_rate: totalsActualAvg,
       bias_over: totalsN ? round(totalsActualAvg - totalsPredAvg) : 0,
-      weight: learningWeight(totalsN, 0.18, 24),
+      weight: learningWeight(totalsEffectiveN, 0.18, 24),
     },
     forced: {
       n: forcedN,
-      hit_rate: forcedN ? round(forcedHits / forcedN) : null,
+      effective_n: round(forcedEffectiveN, 2),
+      hit_rate: forcedEffectiveN ? round(forcedHitWeight / forcedEffectiveN) : null,
+      raw_hit_rate: forcedN ? round(forcedHits / forcedN) : null,
+      by_market: forcedByMarket,
     },
   };
 }
@@ -278,6 +334,47 @@ function expectedPointsFromOpinion(row, isHome) {
   return isHome ? 3 * probs.home + probs.draw : 3 * probs.away + probs.draw;
 }
 
+function basicTeamProfile(db, teamId, cutoffUtc, excludedMatchId) {
+  const rows = teamFormRows(db, teamId, cutoffUtc, excludedMatchId);
+  let points = 0;
+  let gd = 0;
+  for (const row of rows) {
+    const isHome = row.home_team_id === teamId;
+    const forGoals = Number(isHome ? row.home_score : row.away_score);
+    const againstGoals = Number(isHome ? row.away_score : row.home_score);
+    points += pointsFor(forGoals, againstGoals);
+    gd += forGoals - againstGoals;
+  }
+  const played = rows.length;
+  return {
+    played,
+    ppg: played ? points / played : null,
+    gd_per_match: played ? gd / played : null,
+  };
+}
+
+function profileStrength(profile) {
+  if (!profile?.played) return 0;
+  return (
+    clamp(((profile.ppg ?? 1.33) - 1.33) / 1.67, -1, 1) * 0.55 +
+    clamp((profile.gd_per_match ?? 0) / 2, -1, 1) * 0.45
+  );
+}
+
+function opponentContext(db, rows, teamId, cutoffUtc, excludedMatchId) {
+  const strengths = [];
+  for (const row of rows) {
+    const opponentId = row.home_team_id === teamId ? row.away_team_id : row.home_team_id;
+    const profile = basicTeamProfile(db, opponentId, cutoffUtc, excludedMatchId);
+    if (profile.played) strengths.push(profileStrength(profile));
+  }
+  const avg = strengths.length ? strengths.reduce((s, x) => s + x, 0) / strengths.length : 0;
+  return {
+    opponent_sample: strengths.length,
+    opponent_strength_avg: round(avg),
+  };
+}
+
 function teamFormStats(db, teamId, cutoffUtc, excludedMatchId) {
   const rows = teamFormRows(db, teamId, cutoffUtc, excludedMatchId);
   let points = 0;
@@ -286,33 +383,44 @@ function teamFormStats(db, teamId, cutoffUtc, excludedMatchId) {
   let expectedPoints = 0;
   let actualPointsWithExpectation = 0;
   let expectedN = 0;
-  for (const row of rows) {
+  let weightedPoints = 0;
+  let weightedGd = 0;
+  let rowWeightTotal = 0;
+  rows.forEach((row, index) => {
     const isHome = row.home_team_id === teamId;
     const forGoals = Number(isHome ? row.home_score : row.away_score);
     const againstGoals = Number(isHome ? row.away_score : row.home_score);
     const pts = pointsFor(forGoals, againstGoals);
+    const rowWeight = rows.length <= 1 ? 1 : 0.85 + 0.3 * ((index + 1) / rows.length);
     points += pts;
     gf += forGoals;
     ga += againstGoals;
+    weightedPoints += pts * rowWeight;
+    weightedGd += (forGoals - againstGoals) * rowWeight;
+    rowWeightTotal += rowWeight;
     const xp = expectedPointsFromOpinion(row, isHome);
     if (xp != null) {
       expectedN += 1;
       expectedPoints += xp;
       actualPointsWithExpectation += pts;
     }
-  }
+  });
 
   const played = rows.length;
   const ppg = played ? points / played : 0;
   const gd = gf - ga;
   const gdPerMatch = played ? gd / played : 0;
+  const weightedPpg = rowWeightTotal ? weightedPoints / rowWeightTotal : ppg;
+  const weightedGdPerMatch = rowWeightTotal ? weightedGd / rowWeightTotal : gdPerMatch;
   const totalGoalsPerMatch = played ? (gf + ga) / played : null;
   const expectedDelta = expectedN ? (actualPointsWithExpectation - expectedPoints) / expectedN : null;
   const sampleWeight = played ? played / (played + 2) : 0;
+  const opponents = opponentContext(db, rows, teamId, cutoffUtc, excludedMatchId);
+  const opponentAdjustedGd = weightedGdPerMatch + opponents.opponent_strength_avg * 0.35;
   const resultScore =
-    clamp((ppg - 1.33) / 1.67, -1, 1) * 0.42 +
-    clamp(gdPerMatch / 2, -1, 1) * 0.34 +
-    clamp((expectedDelta ?? 0) / 1.4, -1, 1) * 0.24;
+    clamp((weightedPpg - 1.33) / 1.67, -1, 1) * 0.38 +
+    clamp(opponentAdjustedGd / 2, -1, 1) * 0.36 +
+    clamp((expectedDelta ?? 0) / 1.4, -1, 1) * 0.26;
   const strength = round(resultScore * sampleWeight);
 
   return {
@@ -323,6 +431,11 @@ function teamFormStats(db, teamId, cutoffUtc, excludedMatchId) {
     gd,
     ppg: played ? round(ppg) : null,
     gd_per_match: played ? round(gdPerMatch) : null,
+    weighted_ppg: played ? round(weightedPpg) : null,
+    weighted_gd_per_match: played ? round(weightedGdPerMatch) : null,
+    opponent_adjusted_gd_per_match: played ? round(opponentAdjustedGd) : null,
+    opponent_sample: opponents.opponent_sample,
+    opponent_strength_avg: opponents.opponent_strength_avg,
     total_goals_per_match: totalGoalsPerMatch == null ? null : round(totalGoalsPerMatch),
     expected_points_matches: expectedN,
     expected_points_per_match: expectedN ? round(expectedPoints / expectedN) : null,
@@ -338,7 +451,8 @@ function teamTournamentForm(db, match) {
   const away = teamFormStats(db, match.away_team_id, match.kickoff_utc, match.id);
   const available = home.played > 0 || away.played > 0;
   const diff = home.strength - away.strength;
-  const h2hDelta = available ? clamp(diff * 0.065, -0.045, 0.045) : 0;
+  const stageMultiplier = match.stage === 'GROUP' ? 1 : 1.22;
+  const h2hDelta = available ? clamp(diff * 0.07 * stageMultiplier, -0.06, 0.06) : 0;
   const homeGoals = home.total_goals_per_match;
   const awayGoals = away.total_goals_per_match;
   const goalsSamples = [homeGoals, awayGoals].filter((x) => Number.isFinite(x));
@@ -352,6 +466,7 @@ function teamTournamentForm(db, match) {
     home,
     away,
     strength_diff: round(diff),
+    stage_multiplier: round(stageMultiplier),
     h2h_delta: round(h2hDelta),
     totals_delta: round(totalsDelta),
     latest_match_at: latestTimestamp(home.latest_match_at, away.latest_match_at),
@@ -491,7 +606,7 @@ function latestOddsRows(db, matchId) {
     FROM odds_snapshots
     WHERE match_id = ?
     ORDER BY taken_at DESC, id DESC
-    LIMIT 500
+    LIMIT 1500
   `).all(matchId);
 }
 
@@ -533,6 +648,59 @@ function h2hMarket(rows) {
   }
   const latestAt = latest.map((r) => r.taken_at).sort().at(-1) || null;
   return { consensus, best, books: books.length, latest_at: latestAt };
+}
+
+function h2hConsensusAt(rows, mode) {
+  const byKey = new Map();
+  for (const row of rows.filter((r) => r.market === 'h2h' && H2H_OUTCOMES.includes(r.outcome) && r.price > 1)) {
+    const key = `${row.bookmaker}|${row.outcome}`;
+    const prev = byKey.get(key);
+    const shouldTake = !prev || (mode === 'earliest'
+      ? String(row.taken_at) < String(prev.taken_at)
+      : String(row.taken_at) > String(prev.taken_at));
+    if (shouldTake) byKey.set(key, row);
+  }
+
+  const byBook = new Map();
+  for (const row of byKey.values()) {
+    if (!byBook.has(row.bookmaker)) byBook.set(row.bookmaker, { prices: {}, times: [] });
+    byBook.get(row.bookmaker).prices[row.outcome] = row.price;
+    byBook.get(row.bookmaker).times.push(row.taken_at);
+  }
+
+  const books = [];
+  for (const [bookmaker, book] of byBook) {
+    if (!H2H_OUTCOMES.every((o) => book.prices[o] > 1)) continue;
+    books.push({ bookmaker, implied: demarginate(book.prices), times: book.times });
+  }
+  if (!books.length) return null;
+  return {
+    books: books.length,
+    consensus: normalize(Object.fromEntries(
+      H2H_OUTCOMES.map((o) => [o, median(books.map((b) => b.implied[o]))])
+    )),
+    taken_at: books.flatMap((b) => b.times).sort().at(mode === 'earliest' ? 0 : -1) || null,
+  };
+}
+
+function h2hMarketMovement(rows) {
+  const opening = h2hConsensusAt(rows, 'earliest');
+  const latest = h2hConsensusAt(rows, 'latest');
+  if (!opening || !latest || opening.books < 3 || latest.books < 3 || opening.taken_at === latest.taken_at) {
+    return { available: false };
+  }
+  const delta = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, round(latest.consensus[o] - opening.consensus[o])]));
+  const leader = H2H_OUTCOMES.reduce((acc, o) => Math.abs(delta[o]) > Math.abs(delta[acc]) ? o : acc, 'home');
+  return {
+    available: true,
+    opening_at: opening.taken_at,
+    latest_at: latest.taken_at,
+    opening_books: opening.books,
+    latest_books: latest.books,
+    delta,
+    leader,
+    max_delta: round(Math.abs(delta[leader])),
+  };
 }
 
 function totalsOutcome(row) {
@@ -582,6 +750,27 @@ function totalsMarkets(rows) {
     };
     return { line, probs, best, books: books.length, synthetic: false };
   }).sort((a, b) => a.line - b.line);
+}
+
+function totalsDepthWeight(books) {
+  if (!books) return 1;
+  return round(clamp(0.55 + 0.45 * (Math.min(books, 8) / 8), 0.55, 1));
+}
+
+function applyTotalsDepthAdjustment(lines) {
+  return lines.map((line) => {
+    if (line.synthetic) return line;
+    const weight = totalsDepthWeight(line.books);
+    if (weight >= 0.999) return { ...line, market_depth_weight: 1, depth_adjusted: false };
+    const over = clamp(0.5 + (line.probs.over - 0.5) * weight, 0.05, 0.95);
+    const probs = normalize({ over, under: 1 - over });
+    return {
+      ...line,
+      probs,
+      market_depth_weight: weight,
+      depth_adjusted: true,
+    };
+  });
 }
 
 function pickSuggestion(suggestions) {
@@ -644,7 +833,23 @@ function adjustTotals(lines, scorecard) {
   });
 }
 
-function bestForcedPick(match, h2h, fairOdds, market, totals) {
+function forcedReliabilityAdjustment(calibration, bucket) {
+  const marketStats = calibration?.forced?.by_market?.[bucket];
+  const globalHit = calibration?.forced?.hit_rate;
+  if (!marketStats?.effective_n || marketStats.effective_n < 6 || marketStats.hit_rate == null || globalHit == null) return 0;
+  const sampleWeight = marketStats.effective_n / (marketStats.effective_n + 10);
+  return round(clamp((marketStats.hit_rate - globalHit) * sampleWeight * 0.18, -0.035, 0.025));
+}
+
+function marketDepthAdjustment(candidate) {
+  if (candidate.market === '1X2') return 0;
+  const books = Number(candidate.source_books || 0);
+  if (!books) return -0.018;
+  if (books < 3) return -0.012 * (3 - books);
+  return 0;
+}
+
+function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
   const candidates = H2H_OUTCOMES.map((o) => {
     const price = market?.best?.[o]?.price || null;
     return {
@@ -655,6 +860,7 @@ function bestForcedPick(match, h2h, fairOdds, market, totals) {
       fair_odds: fairOdds[o],
       market_price: price,
       edge: price ? h2h[o] * price - 1 : null,
+      source_books: market?.books || 0,
     };
   });
   for (const line of totals) {
@@ -668,20 +874,34 @@ function bestForcedPick(match, h2h, fairOdds, market, totals) {
         fair_odds: line.fair_odds[side],
         market_price: price,
         edge: price ? line.probs[side] * price - 1 : null,
+        source_books: line.books || 0,
+        market_depth_weight: line.market_depth_weight ?? null,
       });
     }
   }
+  for (const candidate of candidates) {
+    const bucket = forcedMarketBucket(candidate.market);
+    const reliability = forcedReliabilityAdjustment(calibration, bucket);
+    const depth = marketDepthAdjustment(candidate);
+    const edge = candidate.edge == null ? 0 : clamp(candidate.edge * 0.08, -0.012, 0.018);
+    candidate.choice_score = round(candidate.probability + reliability + depth + edge);
+    candidate.choice_adjustments = { reliability, depth, edge };
+  }
   return candidates.sort((a, b) => {
+    const byScore = b.choice_score - a.choice_score;
+    if (Math.abs(byScore) > 0.0001) return byScore;
     const byProbability = b.probability - a.probability;
     if (Math.abs(byProbability) > 0.0001) return byProbability;
     return (b.edge ?? -Infinity) - (a.edge ?? -Infinity);
   })[0];
 }
 
-function confidence({ market, totals, intel, scorecard, previous, calibration, teamForm, live }) {
+function confidence({ market, totals, intel, scorecard, previous, calibration, teamForm, live, marketMovement }) {
   let c = 30;
   if (market) c += 18;
-  if (totals.some((t) => !t.synthetic)) c += 6;
+  if (market?.books >= 12) c += 2;
+  if (totals.some((t) => !t.synthetic && (t.books || 0) >= 4)) c += 6;
+  else if (totals.some((t) => !t.synthetic)) c += 3;
   if (intel) c += RELIABILITY_BONUS[intel.reliability] ?? 4;
   if (intel?.freshness_status === 'stale') c -= 8;
   if (scorecard) {
@@ -696,6 +916,7 @@ function confidence({ market, totals, intel, scorecard, previous, calibration, t
     else if (calibration.forced.hit_rate >= 0.6) c += 2;
   }
   if (teamForm?.available) c += teamForm.home.played && teamForm.away.played ? 3 : 1;
+  if (marketMovement?.available && marketMovement.max_delta >= 0.025) c += 1;
   if (live?.active) c += live.score_known ? 2 : -5;
   return clamp(Math.round(c), 20, 82);
 }
@@ -724,6 +945,7 @@ function changeSummary(previous, sources) {
   if (sources.latest_odds_at && sources.latest_odds_at > previous.generated_at) changed.push('cotes');
   if (sources.latest_calibration_result_at && sources.latest_calibration_result_at > previous.generated_at) changed.push('résultats précédents');
   if (sources.latest_team_form_match_at && sources.latest_team_form_match_at > previous.generated_at) changed.push('forme tournoi');
+  if (sources.latest_market_movement_at && sources.latest_market_movement_at > previous.generated_at) changed.push('mouvement marché');
   if (sources.live_score_changed) changed.push('score live');
   return changed.length
     ? `Nouveaux signaux depuis le dernier avis : ${changed.join(', ')}.`
@@ -736,7 +958,10 @@ function calibrationSummary(calibration) {
     const hitRate = calibration.forced?.hit_rate != null
       ? `, choix forcé juste ${(calibration.forced.hit_rate * 100).toFixed(0)} % du temps`
       : '';
-    return ` La calibration relit ${n} avis pré-match déjà clos${hitRate}; l'effet reste plafonné pour éviter le surapprentissage.`;
+    const effective = calibration.h2h?.effective_n && Math.abs(calibration.h2h.effective_n - n) >= 1
+      ? `, poids effectif ${calibration.h2h.effective_n}`
+      : '';
+    return ` La calibration relit ${n} avis pré-match déjà clos${effective}${hitRate}; les versions anciennes et les matchs moins récents pèsent moins.`;
   }
   if (n > 0) return ` ${n} avis pré-match clos sont suivis, mais l'échantillon reste trop court pour peser fortement.`;
   return ' Aucun historique pré-match clos ne pèse encore sur ce calcul.';
@@ -755,7 +980,10 @@ function teamFormSummary(match, form) {
   const impactSide = Math.abs(form.h2h_delta) < 0.008
     ? 'signal forme quasi neutre'
     : `bonus forme ${form.h2h_delta > 0 ? homeName : awayName}`;
-  return ` Forme tournoi intégrée : ${home}; ${away}; ${impactSide}.`;
+  const opponentText = (form.home.opponent_sample || form.away.opponent_sample)
+    ? 'Adversaires rencontrés inclus.'
+    : '';
+  return ` Forme tournoi intégrée : ${home}; ${away}; ${impactSide}.${opponentText ? ` ${opponentText}` : ''}`;
 }
 
 function liveContextSummary(match, live) {
@@ -774,7 +1002,18 @@ function liveContextSummary(match, live) {
   return ` Score live intégré : ${live.score}; le nul reprend du poids, avec prudence faute de chronologie détaillée.`;
 }
 
-function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live) {
+function marketMovementSummary(match, movement) {
+  if (!movement?.available || movement.max_delta < 0.025) return '';
+  return ` Mouvement marché surveillé : le dernier consensus a bougé vers ${teamName(match, movement.leader)} de ${(movement.max_delta * 100).toFixed(1)} points depuis l'ouverture.`;
+}
+
+function totalsDepthSummary(totals) {
+  const adjusted = totals.filter((line) => line.depth_adjusted);
+  if (!adjusted.length) return '';
+  return ' Les lignes de buts peu profondes sont volontairement amorties avant le choix forcé.';
+}
+
+function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement) {
   const ordered = H2H_OUTCOMES.slice().sort((a, b) => h2h[b] - h2h[a]);
   const fav = ordered[0];
   const favName = teamName(match, fav);
@@ -790,10 +1029,12 @@ function summarize(match, h2h, totals, forced, conf, sources, calibration, teamF
   const pick = ` Si obligation de se positionner : ${forced.label}.`;
   const form = teamFormSummary(match, teamForm);
   const liveText = liveContextSummary(match, live);
+  const movement = marketMovementSummary(match, marketMovement);
+  const depth = totalsDepthSummary(totals);
   const learned = calibrationSummary(calibration);
   return {
     headline: `${favName} ${h2h[fav] >= 0.5 ? 'net favori Codex' : 'léger avantage Codex'}`,
-    summary: `${lead}${ou}${liveText} ${data}${form}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
+    summary: `${lead}${ou}${liveText}${movement} ${data}${form}${depth}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
   };
 }
 
@@ -1042,6 +1283,7 @@ export function generateCodexOpinion(db, matchId) {
   const live = liveContext(match);
 
   const market = h2hMarket(odds);
+  const marketMovement = h2hMarketMovement(odds);
   const base = market?.consensus || { home: 0.39, draw: 0.29, away: 0.32 };
   const suggestion = pickSuggestion(suggestions);
   let h2h = suggestion ? blend(base, targetFromSuggestion(base, suggestion), 0.18) : base;
@@ -1053,18 +1295,21 @@ export function generateCodexOpinion(db, matchId) {
   const fairOdds = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, impliedOdds(h2h[o])]));
 
   const rawTotals = totalsMarkets(odds);
+  const totalsInput = rawTotals.length
+    ? applyTotalsDepthAdjustment(rawTotals)
+    : syntheticTotalsFromH2h(h2h, scorecard);
   const totals = applyLiveTotalsAdjustment(
     applyTotalsCalibration(
       applyTeamFormTotals(
-        adjustTotals(rawTotals.length ? rawTotals : syntheticTotalsFromH2h(h2h, scorecard), scorecard),
+        adjustTotals(totalsInput, scorecard),
         teamForm
       ),
       calibration
     ),
     live
   );
-  const forced = bestForcedPick(match, h2h, fairOdds, market, totals);
-  const conf = confidence({ market, totals, intel, scorecard, previous, calibration, teamForm, live });
+  const forced = bestForcedPick(match, h2h, fairOdds, market, totals, calibration);
+  const conf = confidence({ market, totals, intel, scorecard, previous, calibration, teamForm, live, marketMovement });
   const previousLive = previous?.diagnostics?.live_context || null;
   const liveScoreChanged = !!(live.active && previous && (
     previousLive?.status !== live.status ||
@@ -1091,15 +1336,31 @@ export function generateCodexOpinion(db, matchId) {
     odds: odds.map((o) => [o.market, o.outcome, o.point, o.price, o.bookmaker, o.taken_at]).slice(0, 120),
     calibration: {
       latest_result_at: calibration.latest_result_at,
-      h2h: { n: calibration.h2h.n, bias: calibration.h2h.bias, weight: calibration.h2h.weight },
-      totals: { n: calibration.totals.n, bias_over: calibration.totals.bias_over, weight: calibration.totals.weight },
+      h2h: { n: calibration.h2h.n, effective_n: calibration.h2h.effective_n, bias: calibration.h2h.bias, weight: calibration.h2h.weight },
+      totals: { n: calibration.totals.n, effective_n: calibration.totals.effective_n, bias_over: calibration.totals.bias_over, weight: calibration.totals.weight },
+      forced: { n: calibration.forced.n, effective_n: calibration.forced.effective_n, hit_rate: calibration.forced.hit_rate, by_market: calibration.forced.by_market },
     },
     team_form: {
       latest_match_at: teamForm.latest_match_at,
-      home: { played: teamForm.home.played, points: teamForm.home.points, gd: teamForm.home.gd, strength: teamForm.home.strength },
-      away: { played: teamForm.away.played, points: teamForm.away.points, gd: teamForm.away.gd, strength: teamForm.away.strength },
+      home: {
+        played: teamForm.home.played, points: teamForm.home.points, gd: teamForm.home.gd,
+        strength: teamForm.home.strength, opponent_strength_avg: teamForm.home.opponent_strength_avg,
+      },
+      away: {
+        played: teamForm.away.played, points: teamForm.away.points, gd: teamForm.away.gd,
+        strength: teamForm.away.strength, opponent_strength_avg: teamForm.away.opponent_strength_avg,
+      },
       h2h_delta: teamForm.h2h_delta,
       totals_delta: teamForm.totals_delta,
+    },
+    market_movement: marketMovement,
+    totals_depth: totals.map((t) => [t.line, t.books, t.market_depth_weight ?? 1, !!t.depth_adjusted]),
+    forced_choice: {
+      market: forced.market,
+      selection: forced.selection,
+      choice_score: forced.choice_score,
+      choice_adjustments: forced.choice_adjustments,
+      source_books: forced.source_books,
     },
     live_context: live,
   };
@@ -1113,16 +1374,30 @@ export function generateCodexOpinion(db, matchId) {
     latest_odds_at: latestTimestamp(...odds.map((o) => o.taken_at)),
     latest_calibration_result_at: calibration.latest_result_at,
     latest_team_form_match_at: teamForm.latest_match_at,
+    latest_market_movement_at: marketMovement.available ? marketMovement.latest_at : null,
     latest_live_at: live.active ? live.updated_at : null,
     live_score_changed: liveScoreChanged,
   };
   const changes = changeSummary(previous, sources);
-  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live);
+  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_history' : 'conservative_prior_plus_team_form_history',
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_weighted_history' : 'conservative_prior_plus_team_form_weighted_history',
     h2h_books: market?.books || 0,
-    totals_lines: totals.map((t) => ({ line: t.line, books: t.books, synthetic: t.synthetic })),
+    market_movement: marketMovement,
+    totals_lines: totals.map((t) => ({
+      line: t.line,
+      books: t.books,
+      synthetic: t.synthetic,
+      market_depth_weight: t.market_depth_weight ?? 1,
+      depth_adjusted: !!t.depth_adjusted,
+    })),
+    forced_choice: {
+      choice_score: forced.choice_score,
+      choice_adjustments: forced.choice_adjustments,
+      source_books: forced.source_books,
+      market_depth_weight: forced.market_depth_weight ?? null,
+    },
     previous_opinion_id: previous?.id || null,
     input_hash: hash,
     sources,

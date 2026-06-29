@@ -67,11 +67,13 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v3');
+  assert.equal(opinion.model_version, 'codex-book-v4');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
+  assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_weighted_history');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -99,6 +101,31 @@ test('generateCodexOpinion : ignore les lignes Over Under entieres et quart de b
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5]);
   assert.equal(opinion.forced_pick_market.includes('OU_2.25'), false);
   assert.equal(opinion.forced_pick_market.includes('OU_2.75'), false);
+});
+
+test('generateCodexOpinion : amortit les lignes Over Under peu profondes', () => {
+  const db = freshDb();
+  for (const [outcome, price] of [['home', 1.90], ['draw', 3.45], ['away', 4.50]]) {
+    db.prepare(`
+      INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+      VALUES (1, 'book-a', 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+    `).run({ outcome, price });
+  }
+  for (const [side, price] of [['over', 1.25], ['under', 4.50]]) {
+    db.prepare(`
+      INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, point, price, taken_at)
+      VALUES (1, 'book-a', 'totals', @outcome, 1.5, @price, '2026-06-11T08:00:00Z')
+    `).run({ outcome: `${side}_1.5`, price });
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const line = opinion.totals.find((item) => item.line === 1.5);
+
+  assert.equal(line.depth_adjusted, true);
+  assert.ok(line.market_depth_weight < 1);
+  assert.ok(line.probs.over < 0.72);
+  assert.ok(line.probs.over > 0.6);
+  assert.match(opinion.summary, /peu profondes/);
 });
 
 test('generateCodexOpinion : conserve l’historique et détecte une relance sans changement matériel', () => {
@@ -223,6 +250,7 @@ test('generateCodexOpinion : affine les probabilités avec les avis pré-match d
   const opinion = generateCodexOpinion(db, 1);
 
   assert.equal(opinion.diagnostics.calibration.h2h.n, 3);
+  assert.ok(opinion.diagnostics.calibration.h2h.effective_n < 3);
   assert.equal(opinion.diagnostics.calibration.totals.n, 3);
   assert.ok(opinion.diagnostics.calibration.h2h.bias.away < 0);
   assert.ok(opinion.probabilities.away < 0.32);
@@ -258,6 +286,8 @@ test('generateCodexOpinion : pondère les matchs déjà joués par les équipes'
 
   assert.equal(opinion.diagnostics.team_form.home.played, 1);
   assert.equal(opinion.diagnostics.team_form.away.played, 1);
+  assert.equal(opinion.diagnostics.team_form.home.opponent_sample, 1);
+  assert.equal(opinion.diagnostics.team_form.away.opponent_sample, 1);
   assert.ok(opinion.diagnostics.team_form.h2h_delta > 0);
   assert.ok(opinion.probabilities.home > baseline.probabilities.home);
   assert.match(opinion.summary, /Forme tournoi intégrée/);
