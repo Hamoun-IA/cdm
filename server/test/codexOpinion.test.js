@@ -67,7 +67,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v8');
+  assert.equal(opinion.model_version, 'codex-book-v9');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -246,6 +246,28 @@ test('generateCodexOpinion : fonctionne sans cotes avec priors conservateurs', (
   assert.equal(opinion.totals[0].synthetic, true);
   assert.ok(opinion.confidence_score < 50);
   assert.ok(opinion.forced_pick_label);
+});
+
+test('generateCodexOpinion : sans cotes, renforce la forme tournoi et pénalise les O/U synthétiques', () => {
+  const db = freshDb();
+  db.prepare("INSERT INTO teams (id, fifa_code, name, group_code) VALUES (3,'AAA','Alpha','B'), (4,'BBB','Beta','B')").run();
+  db.prepare(`
+    INSERT INTO matches (id, fifa_match_number, stage, kickoff_utc, home_team_id, away_team_id, status, home_score, away_score)
+    VALUES
+      (2, 2, 'GROUP', '2026-06-08T19:00:00Z', 1, 3, 'FINISHED', 3, 0),
+      (3, 3, 'GROUP', '2026-06-09T19:00:00Z', 1, 4, 'FINISHED', 2, 0),
+      (4, 4, 'GROUP', '2026-06-08T21:00:00Z', 2, 3, 'FINISHED', 0, 2),
+      (5, 5, 'GROUP', '2026-06-09T21:00:00Z', 2, 4, 'FINISHED', 0, 1)
+  `).run();
+
+  const opinion = generateCodexOpinion(db, 1);
+
+  assert.equal(opinion.diagnostics.h2h_books, 0);
+  assert.equal(opinion.diagnostics.team_form.adjustment.marketless_boost, true);
+  assert.ok(opinion.diagnostics.team_form.adjustment.applied_delta > opinion.diagnostics.team_form.adjustment.base_delta);
+  assert.equal(opinion.totals[0].synthetic, true);
+  assert.equal(opinion.forced_pick_market, '1X2');
+  assert.equal(opinion.forced_pick_selection, 'home');
 });
 
 test('generateCodexOpinion : le choix forcé suit le scénario le plus probable, pas une value cachée', () => {

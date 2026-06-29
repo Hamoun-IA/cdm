@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v8';
+const MODEL_VERSION = 'codex-book-v9';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -801,8 +801,24 @@ function teamTournamentForm(db, match) {
   };
 }
 
-function applyTeamFormAdjustment(probs, form) {
-  const delta = form?.h2h_delta || 0;
+function teamFormAdjustmentPlan(form, hasMarket) {
+  const baseDelta = Number(form?.h2h_delta || 0);
+  const marketless = !hasMarket && form?.available;
+  const weight = marketless ? 1.55 : 1;
+  const maxMove = marketless ? 0.115 : 0.075;
+  const appliedDelta = clamp(baseDelta * weight, -maxMove, maxMove);
+  return {
+    marketless_boost: !!marketless && Math.abs(appliedDelta - baseDelta) >= 0.001,
+    weight: round(weight, 2),
+    max_move: round(maxMove),
+    base_delta: round(baseDelta),
+    applied_delta: round(appliedDelta),
+    extra_delta: round(appliedDelta - baseDelta),
+  };
+}
+
+function applyTeamFormAdjustment(probs, form, plan = null) {
+  const delta = plan?.applied_delta ?? form?.h2h_delta ?? 0;
   if (!form?.available || Math.abs(delta) < 0.0001) return probs;
   const out = { ...probs };
   if (delta > 0) {
@@ -1368,6 +1384,7 @@ function forcedReliabilityAdjustment(calibration, bucket) {
 
 function marketDepthAdjustment(candidate) {
   if (candidate.market === '1X2') return 0;
+  if (candidate.synthetic) return -0.085;
   const books = Number(candidate.source_books || 0);
   if (!books) return -0.018;
   if (books < 3) return -0.012 * (3 - books);
@@ -1401,6 +1418,7 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
         edge: price ? line.probs[side] * price - 1 : null,
         source_books: line.books || 0,
         market_depth_weight: line.market_depth_weight ?? null,
+        synthetic: !!line.synthetic,
       });
     }
   }
@@ -1560,7 +1578,7 @@ function tournamentGoalsSummary(goalsContext, totals) {
   return ` Rythme buts tournoi intégré : ${goalsContext.avg_goals} buts/match sur ${goalsContext.matches} matchs, signal ${dir} appliqué prudemment aux lignes O/U.`;
 }
 
-function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement) {
+function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment) {
   const ordered = H2H_OUTCOMES.slice().sort((a, b) => h2h[b] - h2h[a]);
   const fav = ordered[0];
   const favName = teamName(match, fav);
@@ -1835,12 +1853,13 @@ export function generateCodexOpinion(db, matchId) {
   const market = h2hMarket(odds);
   const marketMovement = h2hMarketMovement(odds);
   const totalsMovement = totalsMarketMovement(odds);
+  const teamFormAdjustment = teamFormAdjustmentPlan(teamForm, !!market);
   const base = market?.consensus || { home: 0.39, draw: 0.29, away: 0.32 };
   const suggestion = pickSuggestion(suggestions);
   let h2h = suggestion ? blend(base, targetFromSuggestion(base, suggestion), 0.18) : base;
   const favorite = H2H_OUTCOMES.reduce((acc, o) => h2h[o] > h2h[acc] ? o : acc, 'home');
   h2h = applyQualitativeAdjustments(h2h, { favorite, scorecard, decision });
-  h2h = applyTeamFormAdjustment(h2h, teamForm);
+  h2h = applyTeamFormAdjustment(h2h, teamForm, teamFormAdjustment);
   h2h = applyHistoricalCalibration(h2h, calibration);
   const regimeCalibration = applyRegimeCalibration(h2h, calibration);
   h2h = regimeCalibration.probs;
@@ -1909,6 +1928,7 @@ export function generateCodexOpinion(db, matchId) {
     },
     team_form: {
       latest_match_at: teamForm.latest_match_at,
+      adjustment: teamFormAdjustment,
       home: {
         played: teamForm.home.played, points: teamForm.home.points, gd: teamForm.home.gd,
         strength: teamForm.home.strength, opponent_strength_avg: teamForm.home.opponent_strength_avg,
@@ -1960,6 +1980,7 @@ export function generateCodexOpinion(db, matchId) {
     latest_odds_at: latestTimestamp(...odds.map((o) => o.taken_at)),
     latest_calibration_result_at: calibration.latest_result_at,
     latest_team_form_match_at: teamForm.latest_match_at,
+    team_form_adjustment: teamFormAdjustment,
     latest_tournament_goals_at: goalsContext.available ? goalsContext.latest_match_at : null,
     latest_market_movement_at: marketMovement.available ? marketMovement.latest_at : null,
     latest_totals_market_movement_at: totalsMovement.available ? totalsMovement.latest_at : null,
@@ -1967,10 +1988,10 @@ export function generateCodexOpinion(db, matchId) {
     live_score_changed: liveScoreChanged,
   };
   const changes = changeSummary(previous, sources);
-  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement);
+  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_power_rating_regime_calibrated' : 'conservative_prior_plus_team_form_power_rating_regime_calibrated',
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_power_rating_regime_calibrated' : 'conservative_prior_plus_marketless_team_form_boost_power_rating_regime_calibrated',
     h2h_books: market?.books || 0,
     market_movement: marketMovement,
     totals_market_movement: totalsMovement,
@@ -1999,7 +2020,7 @@ export function generateCodexOpinion(db, matchId) {
     calibration,
     regime_calibration: regimeCalibration.applied,
     tournament_goals: goalsContext,
-    team_form: teamForm,
+    team_form: { ...teamForm, adjustment: teamFormAdjustment },
     live_context: live,
   };
 
