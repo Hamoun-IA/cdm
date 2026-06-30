@@ -41,6 +41,14 @@ SIGNAL FORT: la seule info qui changerait une cote si le marché la connaissait
 FIABILITÉ GLOBALE: haute / moyenne / basse
 ```
 
+## Boucle Avis Codex
+
+Le digest expose `codex_audit.investigation_focus`. Utilise-le comme liste
+d'angles a verifier, pas comme une prediction. Si un focus mentionne O/U, buts
+ou rythme, documente tempo, meteo, rotations, gardiens, absences offensives et
+defensives. Si un focus mentionne J3, documente motivation, qualification,
+rotation et matchs simultanes en premier.
+
 ## Limites
 
 - Tu ne donnes JAMAIS de probabilité ni de conseil de pari — c'est le rôle du Quant.

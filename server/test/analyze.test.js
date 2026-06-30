@@ -40,6 +40,7 @@ test('déclenche le webhook avec agent scout et le match dans la mission', async
   assert.equal(body.agentId, 'scout');
   assert.match(body.message, /match id=1/);
   assert.match(body.message, /Alpha/);
+  assert.match(body.message, /codex_audit\.investigation_focus/);
   assert.match(body.message, /\/api\/matches\/1\/intel/);
 });
 

@@ -42,6 +42,8 @@ export function createAnalyzer({ url, token }, fetchImpl = fetch) {
       `coup d'envoi ${m.kickoff_utc} (UTC), ${m.group_code ? `groupe ${m.group_code}` : m.stage}, statut ${m.status}. ` +
       `Produis une fiche FRAÎCHE au format strict de templates_fiche_scout.md en insistant sur les ` +
       `derniers changements (compos officielles si sorties, blessures de dernière minute, météo actualisée), ` +
+      `commence par GET http://localhost:3026/api/digest/today et son champ codex_audit.investigation_focus ` +
+      `pour cibler les angles faibles Avis Codex sans produire de probabilites, ` +
       `puis publie-la sur POST http://localhost:3026/api/matches/${matchId}/intel. ` +
       `Ta réponse finale : une ligne de confirmation avec le code HTTP.`;
 

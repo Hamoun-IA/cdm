@@ -6,6 +6,7 @@ import { brusselsDayKey, brusselsDayBoundsUtc, brusselsTime, brusselsDateLong, n
 import { bankrollStats } from './bankrollService.js';
 import { matchMarket } from './marketService.js';
 import { lastQuota } from '../sync/oddsApi.js';
+import { CURRENT_CODEX_MODEL_VERSION, codexOpinionHistory } from './codexOpinionService.js';
 
 const TOURNAMENT_DAY1 = '2026-06-11';
 
@@ -29,6 +30,68 @@ function enrich(db, m) {
     away_display: m.away_name || m.away_placeholder,
     kickoff_brussels: brusselsTime(m.kickoff_utc),
     market: matchMarket(db, m.id),
+  };
+}
+
+function compactAuditMetric(metric) {
+  if (!metric) return null;
+  return {
+    key: metric.key,
+    n: metric.n,
+    hit_rate: metric.hit_rate,
+    favorite_hit_rate: metric.favorite_hit_rate,
+    average_brier: metric.average_brier,
+    avg_confidence: metric.avg_confidence,
+    correct_count: metric.correct_count,
+    incorrect_count: metric.incorrect_count,
+    neutral_count: metric.neutral_count,
+  };
+}
+
+function codexAgentFocus(audit) {
+  const sample = audit?.latest_prematch;
+  if (!sample?.n) {
+    return [
+      "Pas encore assez d'avis Codex termines pour calibrer les agents : Scout doit prioriser faits verifies, compos et contexte reel ; Quant doit rester proche du marche.",
+    ];
+  }
+
+  const weakSegments = audit.weak_segments || [];
+  const focus = weakSegments.slice(0, 4).map((segment) => {
+    const key = String(segment.key || 'segment faible');
+    const rate = segment.hit_rate == null ? 'hit-rate n/a' : `hit-rate ${Math.round(segment.hit_rate * 100)}%`;
+    const brier = segment.average_brier == null ? 'Brier n/a' : `Brier ${segment.average_brier.toFixed(3)}`;
+    if (key.includes('OU_') || key.includes('O/U')) {
+      return `${key} fragile (${rate}, ${brier}) : verifier rythme, meteo, absences offensives/defensives, rotations et forme des gardiens avant tout avis total buts.`;
+    }
+    if (key.includes('Groupe J1')) {
+      return `${key} fragile (${rate}, ${brier}) : ne pas surponderer les favoris avant signaux terrain ; chercher adaptation, chaleur, altitude et prudence d'ouverture.`;
+    }
+    if (key.includes('Groupe J3')) {
+      return `${key} fragile (${rate}, ${brier}) : verifier motivation, rotation, scenarios de classement et matchs simultanes avant d'ajuster les probas.`;
+    }
+    if (key.includes('Confiance')) {
+      return `${key} fragile (${rate}, ${brier}) : reduire conviction si la fiche Scout est basse qualite ou si les sources ne convergent pas.`;
+    }
+    return `${key} fragile (${rate}, ${brier}) : chercher les faits concrets qui expliquent l'ecart au marche avant tout ajustement.`;
+  });
+
+  if (!focus.length) {
+    focus.push("Aucun segment faible net : continuer a documenter les changements materiels depuis le dernier Avis Codex et rester proche du marche hors info sourcee.");
+  }
+  return focus;
+}
+
+function codexAuditForAgents(db) {
+  const { audit } = codexOpinionHistory(db);
+  return {
+    model_version: CURRENT_CODEX_MODEL_VERSION,
+    sample: compactAuditMetric(audit.latest_prematch),
+    by_market: (audit.by_market || []).slice(0, 6).map(compactAuditMetric),
+    by_stage: (audit.by_stage || []).slice(0, 6).map(compactAuditMetric),
+    by_confidence: (audit.by_confidence || []).slice(0, 4).map(compactAuditMetric),
+    weak_segments: (audit.weak_segments || []).slice(0, 6).map(compactAuditMetric),
+    investigation_focus: codexAgentFocus(audit),
   };
 }
 
@@ -100,6 +163,7 @@ export function digestToday(db, dayKey = brusselsDayKey()) {
       matches.some((m) => m.group_code === g && m.matchday === 3)),
     odds_quota_remaining: lastQuota(db),
     sync_errors_24h: lastErrors,
+    codex_audit: codexAuditForAgents(db),
     cockpit_url: config.cockpitUrl,
   };
 }

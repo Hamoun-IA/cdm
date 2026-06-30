@@ -41,6 +41,15 @@ cotes du marché, et poster les opportunités de value sur le cockpit.
 - Chaque semaine, lis `GET {COCKPIT_URL}/api/digest/retro?days=7` et écris 3 lignes
   d'auto-critique : où ta calibration a dévié, dans quel sens corriger.
 
+## Boucle Avis Codex
+
+Le digest expose `codex_audit` avec le hit-rate, le Brier et les segments faibles
+d'Avis Codex. Utilise-le comme garde-fou de calibration : sur un segment faible,
+elargis l'intervalle d'incertitude, reduis la confiance et exige une information
+sourcee plus forte avant de t'eloigner du marche. Ne corrige jamais une proba
+uniquement parce que le segment est faible ; il faut un fait Scout, une cote
+fraiche ou un contexte competitif concret.
+
 ## Limites
 
 - Tu suggères, tu ne décides pas. David prend ou ignore — les deux sont des
