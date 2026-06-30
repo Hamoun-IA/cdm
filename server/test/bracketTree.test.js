@@ -91,3 +91,26 @@ test('buildTree : aligne les 8es sur leurs vrais vainqueurs entrants', () => {
 
   assert.equal(tree.lines.some((line) => line.key.startsWith('73-89-')), false);
 });
+
+test('buildTree : conserve l ordre officiel de branche meme si les dependances amont changent d ordre', () => {
+  const fixture = worldCupKnockoutFixture();
+  fixture.QF = [
+    m(97, 'QF', 'W90', 'W89'),
+    m(98, 'QF', 'W94', 'W93'),
+    m(99, 'QF', 'W92', 'W91'),
+    m(100, 'QF', 'W96', 'W95'),
+  ];
+  fixture.SF = [
+    m(101, 'SF', 'W98', 'W97'),
+    m(102, 'SF', 'W100', 'W99'),
+  ];
+
+  const tree = buildTree(fixture, m(103, 'THIRD', 'L101', 'L102'));
+  const leftR32 = orderedMatchNosInColumn(tree, 0);
+  const rightR32 = orderedMatchNosInColumn(tree, (TREE.nodeW + TREE.gapX) * 8);
+
+  assert.deepEqual(leftR32, [74, 77, 73, 75, 83, 84, 81, 82]);
+  assert.deepEqual(rightR32, [76, 78, 79, 80, 86, 88, 85, 87]);
+  assertCenteredOnEntrants(tree, 89, 74, 77);
+  assert.equal(tree.lines.some((line) => line.key.startsWith('73-89-')), false);
+});

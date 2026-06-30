@@ -16,7 +16,7 @@ export const TREE = {
   headH: 42,
 };
 
-export const BRACKET_TOPOLOGY_VERSION = 'dependency-v5';
+export const BRACKET_TOPOLOGY_VERSION = 'dependency-v6';
 
 const OFFICIAL_BRANCH_LEAVES = new Map([
   [101, [74, 77, 73, 75, 83, 84, 81, 82]],
@@ -105,11 +105,7 @@ export function buildTree(rounds, third) {
     const recursiveLeaves = uniqueMatchNos(leavesOf(rootNo));
     const officialLeaves = OFFICIAL_BRANCH_LEAVES.get(Number(rootNo));
     const officialLeavesAvailable = officialLeaves?.every((matchNo) => byNumber.has(matchNo));
-    const leafNos = (recursiveLeaves.length >= 8
-      ? recursiveLeaves
-      : officialLeavesAvailable
-        ? officialLeaves
-        : recursiveLeaves).slice(0, 8);
+    const leafNos = (officialLeavesAvailable ? officialLeaves : recursiveLeaves).slice(0, 8);
     leafNos.forEach((matchNo, index) => {
       addNode(matchNo, colByStage.R32, index * stepY + nodeH / 2);
     });
