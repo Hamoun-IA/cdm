@@ -81,7 +81,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v35');
+  assert.equal(opinion.model_version, 'codex-book-v36');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -963,6 +963,8 @@ test('generateCodexOpinion : renforce le nul des matchs ouverts quand le replay 
   assert.equal(guard.available, true);
   assert.equal(guard.applied, true);
   assert.equal(guard.source_key, 'confidence:open');
+  assert.equal(guard.target_draw, 0.48);
+  assert.equal(guard.max_move, 0.045);
   assert.ok(guard.favorite_prob < 0.5);
   assert.ok(guard.draw_delta > 0);
   assert.ok(guard.deltas.draw > 0);
