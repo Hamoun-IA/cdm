@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v87';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v88';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -2815,10 +2815,17 @@ function applyForcedScenarioAlignment(probs, plan) {
   return normalize(adjusted);
 }
 
-function finalOuH2hProtectedTopTarget(forced, topOutcome, teamForm, marketMovement, totalsMovement) {
+function finalOuH2hProtectedTopTarget(forced, topOutcome, topProbability, teamForm, marketMovement, totalsMovement) {
   const defaultTarget = 0.30;
   const homePve = Number(teamForm?.home?.points_vs_expected_per_match);
   const awayPve = Number(teamForm?.away?.points_vs_expected_per_match);
+  const shallowHomeUnder =
+    forced?.selection === 'under'
+    && topOutcome === 'home'
+    && Number(topProbability || 0) < 0.42
+    && !teamForm?.available
+    && marketMovement?.steam_to === 'draw'
+    && Number(marketMovement?.max_delta || 0) >= 0.012;
   const supportedOverAway = forced?.selection === 'over'
     && topOutcome === 'away'
     && teamForm?.available
@@ -2830,6 +2837,7 @@ function finalOuH2hProtectedTopTarget(forced, topOutcome, teamForm, marketMoveme
     && Number(marketMovement?.max_delta || 0) >= 0.025
     && totalsMovement?.direction === 'over'
     && Number(totalsMovement?.max_delta || 0) >= 0.03;
+  if (shallowHomeUnder) return 0.34;
   return supportedOverAway ? 0.45 : defaultTarget;
 }
 
@@ -2901,7 +2909,7 @@ function finalOuH2hUncertaintyPlan(probs, forced, live, teamForm = null, marketM
   const favoriteProb = Number(probs[favorite] || 0);
   const topOutcome = H2H_OUTCOMES.slice().sort((a, b) => probs[b] - probs[a])[0];
   const topProbability = Number(probs[topOutcome] || 0);
-  const targetTopProbability = finalOuH2hProtectedTopTarget(forced, topOutcome, teamForm, marketMovement, totalsMovement);
+  const targetTopProbability = finalOuH2hProtectedTopTarget(forced, topOutcome, topProbability, teamForm, marketMovement, totalsMovement);
   const drawShare = finalOuH2hDrawShare(forced?.selection, topOutcome, topProbability, { teamForm, marketMovement });
   const oppositeShare = round(1 - drawShare);
   const topDrawSideShare = finalOuTopDrawSideShare(forced, topOutcome, marketMovement);
@@ -5554,7 +5562,7 @@ export function generateCodexOpinion(db, matchId) {
   const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, knockoutDrawMemoryAdjustment, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression, homeFavoriteOpenAwayTransfer, centralDrawBandAdjustment, strongFavoriteDrawTail, teamFormContrarianDrawGuard, forcedDrawConviction, forcedScenarioAlignment, finalOuH2hUncertainty, finalOuH2hCalibration);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod50_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod50_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated`,
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod50_shallowhome34_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod50_shallowhome34_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated`,
     h2h_books: market?.books || 0,
     prior: prior.context,
     market_movement: marketMovement,

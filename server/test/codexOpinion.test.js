@@ -109,7 +109,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod50_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod50_shallowhome34_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -513,6 +513,30 @@ test('generateCodexOpinion : redistribue un Under final top domicile presque tou
   assert.equal(uncertainty.draw_share, 0.95);
   assert.equal(uncertainty.opposite_share, 0.05);
   assert.ok(uncertainty.deltas.draw > uncertainty.deltas.away * 10);
+  assert.ok(opinion.probabilities.draw > opinion.probabilities.home);
+});
+
+test('generateCodexOpinion : protege un petit top domicile Under quand le marche pousse le nul', () => {
+  const db = freshDb();
+  const bookmakers = Array.from({ length: 10 }, (_, index) => `book-${index}`);
+  insertH2hOdds(db, [['home', 1.75], ['draw', 4.00], ['away', 3.60]], { takenAt: '2026-06-10T08:00:00Z', bookmakers });
+  insertH2hOdds(db, [['home', 1.95], ['draw', 3.65], ['away', 3.55]], { takenAt: '2026-06-11T08:00:00Z', bookmakers });
+  insertTotalOdds(db, 2.5, 2.45, 1.62, { bookmakers });
+
+  const opinion = generateCodexOpinion(db, 1);
+  const uncertainty = opinion.diagnostics.final_ou_h2h_uncertainty;
+
+  assert.equal(opinion.forced_pick_market, 'OU_2.5');
+  assert.equal(opinion.forced_pick_selection, 'under');
+  assert.equal(opinion.diagnostics.market_movement.steam_to, 'draw');
+  assert.ok(opinion.diagnostics.market_movement.max_delta >= 0.012);
+  assert.equal(uncertainty.available, true);
+  assert.equal(uncertainty.applied, true);
+  assert.equal(uncertainty.top_outcome, 'home');
+  assert.ok(uncertainty.top_probability < 0.42);
+  assert.equal(uncertainty.target_top_probability, 0.34);
+  assert.equal(uncertainty.favorite_floor, 0.34);
+  assert.equal(opinion.probabilities.home, 0.34);
   assert.ok(opinion.probabilities.draw > opinion.probabilities.home);
 });
 
