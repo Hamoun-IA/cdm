@@ -16,7 +16,7 @@ export const TREE = {
   headH: 42,
 };
 
-export const BRACKET_TOPOLOGY_VERSION = 'dependency-v3';
+export const BRACKET_TOPOLOGY_VERSION = 'dependency-v4';
 
 const OFFICIAL_BRANCH_LEAVES = new Map([
   [101, [74, 77, 73, 75, 83, 84, 81, 82]],

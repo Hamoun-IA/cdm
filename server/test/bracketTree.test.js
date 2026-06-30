@@ -55,6 +55,16 @@ function orderedMatchNosInColumn(tree, x) {
     .map((node) => Number(node.match.fifa_match_number));
 }
 
+function assertCenteredOnEntrants(tree, matchNo, firstEntrantNo, secondEntrantNo) {
+  const match = matchNode(tree, matchNo);
+  const firstEntrant = matchNode(tree, firstEntrantNo);
+  const secondEntrant = matchNode(tree, secondEntrantNo);
+
+  assert.equal(centerY(match), (centerY(firstEntrant) + centerY(secondEntrant)) / 2);
+  assert.ok(tree.lines.some((line) => line.key.startsWith(`${firstEntrantNo}-${matchNo}-`)));
+  assert.ok(tree.lines.some((line) => line.key.startsWith(`${secondEntrantNo}-${matchNo}-`)));
+}
+
 test('buildTree : aligne les 8es sur leurs vrais vainqueurs entrants', () => {
   const tree = buildTree(worldCupKnockoutFixture(), m(103, 'THIRD', 'L101', 'L102'));
   assert.equal(tree.topology, BRACKET_TOPOLOGY_VERSION);
@@ -66,16 +76,18 @@ test('buildTree : aligne les 8es sur leurs vrais vainqueurs entrants', () => {
   assert.notDeepEqual(leftR32.slice(0, 2), [73, 74]);
   assert.equal(tree.labels.find((label) => label.key === 'l-r32')?.count, '8 matchs');
 
-  const m74 = matchNode(tree, 74);
-  const m77 = matchNode(tree, 77);
-  const m89 = matchNode(tree, 89);
-  const m73 = matchNode(tree, 73);
-  const m75 = matchNode(tree, 75);
-  const m90 = matchNode(tree, 90);
+  [
+    [89, 74, 77],
+    [90, 73, 75],
+    [91, 76, 78],
+    [92, 79, 80],
+    [93, 83, 84],
+    [94, 81, 82],
+    [95, 86, 88],
+    [96, 85, 87],
+  ].forEach(([matchNo, firstEntrantNo, secondEntrantNo]) => {
+    assertCenteredOnEntrants(tree, matchNo, firstEntrantNo, secondEntrantNo);
+  });
 
-  assert.equal(centerY(m89), (centerY(m74) + centerY(m77)) / 2);
-  assert.equal(centerY(m90), (centerY(m73) + centerY(m75)) / 2);
-  assert.ok(tree.lines.some((line) => line.key.startsWith('74-89-')));
-  assert.ok(tree.lines.some((line) => line.key.startsWith('77-89-')));
   assert.equal(tree.lines.some((line) => line.key.startsWith('73-89-')), false);
 });
