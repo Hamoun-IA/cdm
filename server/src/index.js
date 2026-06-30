@@ -25,8 +25,21 @@ app.use('/api', apiRouter(db, { notify: tg ? tg.notify : null }));
 // Cockpit React buildé (web/dist) si présent — sinon page d'attente.
 const webDist = path.join(ROOT_DIR, 'web', 'dist');
 if (fs.existsSync(path.join(webDist, 'index.html'))) {
-  app.use(express.static(webDist));
-  app.get(/^\/(?!api).*/, (req, res) => res.sendFile(path.join(webDist, 'index.html')));
+  app.use('/assets', express.static(path.join(webDist, 'assets'), {
+    immutable: true,
+    maxAge: '1y',
+  }));
+  app.use(express.static(webDist, {
+    setHeaders: (res, filePath) => {
+      if (path.basename(filePath) === 'index.html') {
+        res.setHeader('Cache-Control', 'no-store');
+      }
+    },
+  }));
+  app.get(/^\/(?!api).*/, (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.sendFile(path.join(webDist, 'index.html'));
+  });
 } else {
   app.get('/', (req, res) =>
     res.send('<h1>WC26 Cockpit</h1><p>API active sur /api — UI en construction (phase 1).</p>')
