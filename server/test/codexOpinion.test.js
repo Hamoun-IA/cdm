@@ -1789,6 +1789,67 @@ test('generateCodexOpinion : apprend les steam home historiques qui finissent en
   assert.ok(opinion.probabilities.draw - baseline.probabilities.draw > 0.018);
 });
 
+test('generateCodexOpinion : apprend la pression home moyenne qui cache du nul', () => {
+  const baselineDb = freshDb();
+  const db = freshDb();
+  for (const targetDb of [baselineDb, db]) {
+    for (const bookmaker of ['book-a', 'book-b', 'book-c']) {
+      for (const [takenAt, home, draw, away] of [
+        ['2026-06-10T08:00:00Z', 1.92, 3.40, 4.70],
+        ['2026-06-11T08:00:00Z', 1.84, 3.45, 5.05],
+      ]) {
+        for (const [outcome, price] of [['home', home], ['draw', draw], ['away', away]]) {
+          targetDb.prepare(`
+            INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+            VALUES (1, @bookmaker, 'h2h', @outcome, @price, @taken_at)
+          `).run({ bookmaker, outcome, price, taken_at: takenAt });
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < 8; i += 1) {
+    const matchId = 30 + i;
+    const isDraw = i < 5;
+    insertTeamResult(db, {
+      id: matchId,
+      kickoff: `2026-06-0${i + 1}T19:00:00Z`,
+      home: 1,
+      away: 2,
+      homeScore: 1,
+      awayScore: isDraw ? 1 : 0,
+    });
+    insertHistoricalOpinion(db, {
+      matchId,
+      generatedAt: `2026-06-0${i + 1}T10:00:00Z`,
+      modelVersion: 'codex-book-v50',
+      probabilities: { home: 0.58, draw: 0.30, away: 0.12 },
+      forcedMarket: '1X2',
+      forcedSelection: 'home',
+      diagnostics: {
+        market_movement: {
+          available: true,
+          leader: 'home',
+          max_delta: 0.020,
+          delta: { home: 0.020, draw: -0.005, away: -0.015 },
+        },
+      },
+    });
+  }
+
+  const baseline = generateCodexOpinion(baselineDb, 1);
+  const opinion = generateCodexOpinion(db, 1);
+  const adjustment = opinion.diagnostics.h2h_market_movement_adjustment.home_steam_draw_caution;
+
+  assert.equal(opinion.diagnostics.market_movement.leader, 'home');
+  assert.equal(adjustment.applied, true);
+  assert.equal(adjustment.pressure_regime, true);
+  assert.equal(adjustment.strong_regime, false);
+  assert.equal(adjustment.source_key, 'market_movement:home:draw_pressure');
+  assert.ok(adjustment.calibrated_delta > 0.01);
+  assert.ok(opinion.probabilities.draw - baseline.probabilities.draw > 0.01);
+});
+
 test('generateCodexOpinion : applique le mouvement marche 1X2 dans la bonne direction', () => {
   const db = freshDb();
   for (const bookmaker of ['book-a', 'book-b', 'book-c']) {

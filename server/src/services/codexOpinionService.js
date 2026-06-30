@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v50';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v51';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -94,7 +94,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v49' || version === 'codex-book-v48' || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v50' || version === 'codex-book-v49' || version === 'codex-book-v48' || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -181,6 +181,14 @@ function h2hMarketMovementRegimeKeys(movement) {
     `market_movement:${leader}:${strength}`,
     `market_movement:${leader}`,
   ];
+  if (
+    leader === 'home'
+    && maxDelta >= 0.018
+    && Number(movement.delta?.draw || 0) <= 0.008
+    && Number(movement.delta?.away || 0) < -0.012
+  ) {
+    keys.unshift('market_movement:home:draw_pressure');
+  }
   if (
     leader === 'home'
     && strength === 'strong'
@@ -2469,33 +2477,60 @@ function h2hMarketMovementAdjustmentPlan(movement, calibration = null) {
     round(clamp(Number(movement.delta[outcome] || 0) * weight, -maxMove, maxMove)),
   ]));
   const homeSteamDrawCaution = { applied: false, draw_delta: 0 };
-  if (
+  const homeStrongDrawCaution = (
     movement.leader === 'home'
     && Number(movement.max_delta || 0) >= 0.025
     && Number(movement.delta.draw || 0) <= 0
     && Number(movement.delta.away || 0) < 0
-  ) {
-    const fallbackDelta = clamp((Number(movement.max_delta) - 0.018) * depth * 0.55, 0, 0.018);
+  );
+  const homeDrawPressure = (
+    movement.leader === 'home'
+    && Number(movement.max_delta || 0) >= 0.018
+    && Number(movement.delta.draw || 0) <= 0.008
+    && Number(movement.delta.away || 0) < -0.012
+  );
+  if (homeStrongDrawCaution || homeDrawPressure) {
+    const maxDelta = Number(movement.max_delta || 0);
+    const fallbackDelta = homeStrongDrawCaution
+      ? clamp((maxDelta - 0.018) * depth * 0.55, 0, 0.018)
+      : clamp((maxDelta - 0.016) * depth * 0.34, 0, 0.009);
     const regimes = calibration?.h2h_regimes || {};
-    const sourceKey = regimes['market_movement:home:strong_draw_caution']
+    const sourceKey = homeStrongDrawCaution && regimes['market_movement:home:strong_draw_caution']
       ? 'market_movement:home:strong_draw_caution'
-      : 'market_movement:home:strong';
-    const source = regimes[sourceKey];
+      : regimes['market_movement:home:draw_pressure']
+        ? 'market_movement:home:draw_pressure'
+        : regimes['market_movement:home:strong']
+          ? 'market_movement:home:strong'
+          : null;
+    const source = sourceKey ? regimes[sourceKey] : null;
     const effectiveN = Number(source?.effective_n || 0);
     const drawBias = Number(source?.bias?.draw || 0);
     const sampleWeight = effectiveN / (effectiveN + 9);
-    const calibratedCap = effectiveN >= 7 ? 0.068 : effectiveN >= 4.5 ? 0.05 : 0.03;
-    const calibratedDelta = effectiveN >= 2.5 && drawBias >= 0.08
-      ? clamp((drawBias - 0.03) * sampleWeight * 0.88, 0, calibratedCap)
+    const calibratedCap = homeStrongDrawCaution
+      ? effectiveN >= 7 ? 0.074 : effectiveN >= 4.5 ? 0.056 : 0.034
+      : effectiveN >= 7 ? 0.034 : effectiveN >= 4.5 ? 0.026 : 0.014;
+    const minBias = homeStrongDrawCaution ? 0.08 : 0.1;
+    const biasOffset = homeStrongDrawCaution ? 0.03 : 0.05;
+    const biasMultiplier = homeStrongDrawCaution ? 0.92 : 0.52;
+    const calibratedDelta = effectiveN >= 2.5 && drawBias >= minBias
+      ? clamp((drawBias - biasOffset) * sampleWeight * biasMultiplier, 0, calibratedCap)
       : 0;
-    const pressureDelta = clamp((Number(movement.max_delta) - 0.025) * depth * 0.22, 0, 0.014);
-    const drawDelta = round(clamp(Math.max(fallbackDelta, calibratedDelta + pressureDelta), 0, 0.078));
+    const pressureDelta = homeStrongDrawCaution
+      ? clamp((maxDelta - 0.025) * depth * 0.22, 0, 0.014)
+      : clamp((maxDelta - 0.018) * depth * 0.18, 0, 0.006);
+    const drawDelta = round(clamp(
+      Math.max(fallbackDelta, calibratedDelta + pressureDelta),
+      0,
+      homeStrongDrawCaution ? 0.085 : 0.04
+    ));
     if (drawDelta >= 0.002) {
       deltas.home = round(deltas.home - drawDelta * 0.72);
       deltas.draw = round(deltas.draw + drawDelta);
       deltas.away = round(deltas.away - drawDelta * 0.28);
       Object.assign(homeSteamDrawCaution, {
         applied: true,
+        pressure_regime: homeDrawPressure,
+        strong_regime: homeStrongDrawCaution,
         draw_delta: drawDelta,
         fallback_delta: round(fallbackDelta),
         calibrated_delta: round(calibratedDelta),
