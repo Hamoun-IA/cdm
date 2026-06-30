@@ -81,13 +81,13 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v47');
+  assert.equal(opinion.model_version, 'codex-book-v48');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_compression_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_compression_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -1243,6 +1243,36 @@ test('generateCodexOpinion : compresse l outsider exterieur des favoris domicile
   assert.equal(compression.deltas.draw, 0);
   assert.ok(opinion.probabilities.away < compression.away_prob);
   assert.match(opinion.summary, /outsider exterieur/);
+});
+
+test('generateCodexOpinion : rabote le reliquat outsider des favoris domicile nets', () => {
+  const db = freshDb();
+  db.prepare('UPDATE matches SET matchday = 2 WHERE id = 1').run();
+  for (const bookmaker of ['book-a', 'book-b', 'book-c']) {
+    for (const [outcome, price] of [['home', 1.58], ['draw', 4.00], ['away', 8.50]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const residual = opinion.diagnostics.home_favorite_residual_away_compression;
+
+  assert.equal(residual.available, true);
+  assert.equal(residual.applied, true);
+  assert.equal(residual.favorite, 'home');
+  assert.ok(residual.favorite_prob >= 0.62);
+  assert.ok(residual.away_prob <= 0.14);
+  assert.equal(residual.away_floor, 0.025);
+  assert.ok(residual.compression_delta > 0);
+  assert.ok(residual.compression_delta <= residual.max_move);
+  assert.ok(residual.deltas.away < 0);
+  assert.ok(residual.deltas.home > 0);
+  assert.ok(residual.deltas.draw > 0);
+  assert.ok(opinion.probabilities.away < residual.away_prob);
+  assert.match(opinion.summary, /Queue outsider domicile/);
 });
 
 test('generateCodexOpinion : calibre les lignes Over Under par ligne standard', () => {
