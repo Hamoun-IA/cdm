@@ -109,7 +109,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod40_shallowhome34_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod40_shallowhome36_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -534,9 +534,9 @@ test('generateCodexOpinion : protege un petit top domicile Under quand le marche
   assert.equal(uncertainty.applied, true);
   assert.equal(uncertainty.top_outcome, 'home');
   assert.ok(uncertainty.top_probability < 0.42);
-  assert.equal(uncertainty.target_top_probability, 0.34);
-  assert.equal(uncertainty.favorite_floor, 0.34);
-  assert.equal(opinion.probabilities.home, 0.34);
+  assert.equal(uncertainty.target_top_probability, 0.36);
+  assert.equal(uncertainty.favorite_floor, 0.36);
+  assert.equal(opinion.probabilities.home, 0.36);
   assert.ok(opinion.probabilities.draw > opinion.probabilities.home);
 });
 
