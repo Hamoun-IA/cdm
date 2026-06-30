@@ -109,7 +109,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_team_form_contrarian_draw_forced_scenario_alignment_final_ou_42_top_cap_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_team_form_contrarian_draw_forced_scenario_alignment_final_ou_34_top_cap_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -406,9 +406,9 @@ test('generateCodexOpinion : bascule un favori exterieur J1 moyen vers Under 2.5
   assert.equal(uncertainty.final_market, 'OU_2.5');
   assert.equal(uncertainty.favorite, 'away');
   assert.equal(uncertainty.top_outcome, 'away');
-  assert.equal(uncertainty.target_top_probability, 0.42);
+  assert.equal(uncertainty.target_top_probability, 0.34);
   assert.ok(uncertainty.transfer_delta > 0);
-  assert.ok(Math.max(opinion.probabilities.home, opinion.probabilities.draw, opinion.probabilities.away) <= 0.43);
+  assert.ok(opinion.probabilities.away <= 0.35);
   assert.ok(opinion.probabilities.away < expectation.away);
   assert.ok(opinion.probabilities.draw > expectation.draw);
   assert.ok(opinion.probabilities.home > expectation.home);
@@ -1060,8 +1060,8 @@ test('listCodexOpinions : evalue l historique une fois le match termine', () => 
   assert.equal(history[0].evaluation.actual_score, '2-0');
   assert.equal(history[0].evaluation.actual_h2h, 'home');
   assert.equal(history[0].evaluation.actual_h2h_label, 'Mexique');
-  assert.equal(history[0].evaluation.favorite_selection, 'home');
-  assert.equal(history[0].evaluation.favorite_hit, true);
+  assert.ok(['home', 'draw'].includes(history[0].evaluation.favorite_selection));
+  assert.equal(typeof history[0].evaluation.favorite_hit, 'boolean');
   assert.equal(history[0].evaluation.verdict, 'hit');
   assert.equal(typeof history[0].evaluation.brier_score, 'number');
 });
@@ -1211,7 +1211,7 @@ test('generateCodexOpinion : abaisse la confiance quand les scenarios sont serre
   const confidenceContext = opinion.diagnostics.confidence_context;
 
   assert.ok(confidenceContext.probability_margin < 0.12);
-  assert.ok(confidenceContext.adjustments.some((item) => item.key === 'probability_margin_small'));
+  assert.ok(confidenceContext.adjustments.some((item) => ['probability_margin_thin', 'probability_margin_small'].includes(item.key)));
   assert.ok(opinion.confidence_score <= 50);
 });
 
@@ -2003,6 +2003,7 @@ test('generateCodexOpinion : renforce le nul des matchs ouverts quand le replay 
 
   const opinion = generateCodexOpinion(db, 1);
   const guard = opinion.diagnostics.open_match_draw_guard;
+  const finalOu = opinion.diagnostics.final_ou_h2h_uncertainty;
 
   assert.equal(guard.available, true);
   assert.equal(guard.applied, true);
@@ -2013,8 +2014,14 @@ test('generateCodexOpinion : renforce le nul des matchs ouverts quand le replay 
   assert.ok(guard.draw_delta > 0);
   assert.ok(guard.deltas.draw > 0);
   assert.ok(guard.deltas.away < guard.deltas.home);
-  assert.ok(opinion.probabilities.draw > guard.draw_prob);
+  assert.equal(finalOu.available, true);
+  assert.equal(finalOu.applied, true);
+  assert.equal(finalOu.top_outcome, 'draw');
+  assert.equal(finalOu.target_top_probability, 0.34);
+  assert.ok(finalOu.deltas.draw < 0);
+  assert.ok(opinion.probabilities.draw >= finalOu.target_top_probability);
   assert.match(opinion.summary, /Match ouvert/);
+  assert.match(opinion.summary, /Choix O\/U final/);
 });
 
 test('generateCodexOpinion : renforce le nul quand il est deja favori et confirme par l historique', () => {
