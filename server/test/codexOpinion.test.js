@@ -87,7 +87,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -1291,6 +1291,54 @@ test('generateCodexOpinion : renforce le nul quand il est deja favori et confirm
   assert.ok(guard.deltas.away < 0);
   assert.ok(opinion.probabilities.draw > guard.draw_prob);
   assert.match(opinion.summary, /Memoire nul favori/);
+});
+
+test('generateCodexOpinion : transfere le reliquat outsider des bandes de nul central', () => {
+  const db = freshDb();
+  db.prepare('UPDATE matches SET matchday = 2 WHERE id = 1').run();
+  db.prepare("INSERT INTO teams (id, fifa_code, name, group_code) VALUES (3,'TST','Temoin A','A'), (4,'TSB','Temoin B','A')").run();
+  for (const bookmaker of ['book-a', 'book-b', 'book-c']) {
+    for (const [outcome, price] of [['home', 2.30], ['draw', 3.10], ['away', 3.60]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+  }
+  for (let id = 2; id <= 13; id++) {
+    insertTeamResult(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      home: 3,
+      away: 4,
+      homeScore: id <= 9 ? 1 : 2,
+      awayScore: id <= 9 ? 1 : 0,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-09T00:00:00Z',
+      modelVersion: 'codex-book-v52',
+      probabilities: { home: 0.44, draw: 0.38, away: 0.18 },
+      forcedMarket: '1X2',
+      forcedSelection: id <= 9 ? 'draw' : 'home',
+    });
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const adjustment = opinion.diagnostics.central_draw_band_adjustment;
+
+  assert.equal(adjustment.available, true);
+  assert.equal(adjustment.applied, true);
+  assert.match(adjustment.source_key, /^draw_band:/);
+  assert.equal(adjustment.side, 'away');
+  assert.ok(adjustment.effective_n >= 4);
+  assert.ok(adjustment.draw_bias >= 0.075);
+  assert.ok(adjustment.side_bias <= -0.07);
+  assert.ok(adjustment.transfer_delta > 0);
+  assert.ok(adjustment.deltas.draw > 0);
+  assert.ok(adjustment.deltas.away < 0);
+  assert.ok(opinion.probabilities.draw > adjustment.draw_prob);
+  assert.match(opinion.summary, /Memoire nul central/);
 });
 
 test('generateCodexOpinion : compresse l outsider exterieur des favoris domicile sur historique confirme', () => {

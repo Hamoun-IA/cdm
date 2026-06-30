@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v52';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v53';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -94,7 +94,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v51' || version === 'codex-book-v50' || version === 'codex-book-v49' || version === 'codex-book-v48' || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v52' || version === 'codex-book-v51' || version === 'codex-book-v50' || version === 'codex-book-v49' || version === 'codex-book-v48' || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -169,6 +169,16 @@ function h2hRegime(probs) {
       `favorite:${favorite}`,
     ],
   };
+}
+
+function drawBandRegimeKeys(probs) {
+  if (!validH2h(probs)) return [];
+  const draw = Number(probs.draw || 0);
+  if (draw >= 0.46) return ['draw_band:46_plus', 'draw_band:central'];
+  if (draw >= 0.40) return ['draw_band:40_46', 'draw_band:central'];
+  if (draw >= 0.32) return ['draw_band:32_40', 'draw_band:central'];
+  if (draw >= 0.24) return ['draw_band:24_32'];
+  return ['draw_band:low'];
 }
 
 function h2hMarketMovementRegimeKeys(movement) {
@@ -363,6 +373,9 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
         favoriteHitWeight += rowWeight;
       }
       for (const key of h2hRegime(probs).keys) {
+        addRegimeSample(regimeBuckets, key, probs, actual, rowWeight);
+      }
+      for (const key of drawBandRegimeKeys(probs)) {
         addRegimeSample(regimeBuckets, key, probs, actual, rowWeight);
       }
       const diagnostics = safeJson(row.diagnostics_json, null);
@@ -2223,6 +2236,105 @@ function applyHomeFavoriteOpenAwayTransfer(probs, plan) {
   return normalize(adjusted);
 }
 
+function centralDrawBandAdjustmentPlan(probs, calibration, hasMarket, live) {
+  const base = {
+    available: !live?.active,
+    applied: false,
+    draw_prob: probs?.draw == null ? null : round(probs.draw),
+    side: null,
+    side_prob: null,
+    source_key: null,
+    effective_n: null,
+    min_effective_n: null,
+    draw_bias: null,
+    side_bias: null,
+    max_move: null,
+    memory_multiplier: null,
+    transfer_delta: 0,
+    deltas: { home: 0, draw: 0, away: 0 },
+  };
+  if (live?.active || !validH2h(probs)) return base;
+  const drawProb = Number(probs.draw || 0);
+  if (drawProb < 0.32 || drawProb >= 0.52) return base;
+
+  const bandKey = drawProb >= 0.46
+    ? 'draw_band:46_plus'
+    : drawProb >= 0.40
+      ? 'draw_band:40_46'
+      : 'draw_band:32_40';
+  const regimes = calibration?.h2h_regimes || {};
+  const specificSource = regimes[bandKey];
+  const centralSource = regimes['draw_band:central'];
+  const useSpecificSource = Number(specificSource?.effective_n || 0) >= 4;
+  const source = useSpecificSource ? specificSource : centralSource;
+  const sourceKey = useSpecificSource ? bandKey : 'draw_band:central';
+  const minEffectiveN = useSpecificSource ? 4 : 8;
+  const effectiveN = Number(source?.effective_n || 0);
+  const drawBias = Number(source?.bias?.draw || 0);
+  const homeBias = Number(source?.bias?.home || 0);
+  const awayBias = Number(source?.bias?.away || 0);
+  const side = awayBias <= homeBias ? 'away' : 'home';
+  const sideBias = side === 'away' ? awayBias : homeBias;
+  const sideProb = Number(probs[side] || 0);
+  if (effectiveN < minEffectiveN || drawBias < 0.075 || sideBias > -0.07 || sideProb < 0.055 || !Number(source?.weight || 0)) {
+    return {
+      ...base,
+      available: true,
+      draw_prob: round(drawProb),
+      side,
+      side_prob: round(sideProb),
+      source_key: sourceKey,
+      effective_n: round(effectiveN, 2),
+      min_effective_n: minEffectiveN,
+      draw_bias: round(drawBias),
+      side_bias: round(sideBias),
+    };
+  }
+
+  const maxMove = sourceKey === 'draw_band:central'
+    ? (hasMarket ? 0.022 : 0.016)
+    : (hasMarket ? 0.035 : 0.024);
+  const memoryMultiplier = sourceKey === 'draw_band:central' ? 2.4 : 3.8;
+  const transferDelta = clamp(
+    Math.min(Math.abs(sideBias), drawBias) * Number(source.weight || 0) * memoryMultiplier,
+    0,
+    maxMove
+  );
+  const applied = transferDelta >= 0.003 && sideProb - transferDelta >= 0.025;
+  const deltas = { home: 0, draw: 0, away: 0 };
+  if (applied) {
+    deltas[side] = round(-transferDelta);
+    deltas.draw = round(transferDelta);
+  }
+
+  return {
+    ...base,
+    available: true,
+    applied,
+    draw_prob: round(drawProb),
+    side,
+    side_prob: round(sideProb),
+    source_key: sourceKey,
+    effective_n: round(effectiveN, 2),
+    min_effective_n: minEffectiveN,
+    draw_bias: round(drawBias),
+    side_bias: round(sideBias),
+    max_move: round(maxMove),
+    memory_multiplier: round(memoryMultiplier),
+    transfer_delta: applied ? round(transferDelta) : 0,
+    deltas,
+  };
+}
+
+function applyCentralDrawBandAdjustment(probs, plan) {
+  if (!plan?.available || !plan.applied) return probs;
+  const adjusted = {};
+  for (const outcome of H2H_OUTCOMES) {
+    adjusted[outcome] = clamp(probs[outcome] + Number(plan.deltas?.[outcome] || 0), 0.025, 0.94);
+  }
+  return normalize(adjusted);
+}
+
 function applyRestTotalsAdjustment(lines, restPlan) {
   const delta = Number(restPlan?.totals_delta || 0);
   if (!restPlan?.available || Math.abs(delta) < 0.0001) {
@@ -3480,7 +3592,13 @@ function homeFavoriteOpenAwayTransferSummary(adjustment) {
   return ` Memoire match ouvert domicile : l'outsider exterieur est reduit (-${(Number(adjustment.compression_delta || 0) * 100).toFixed(1)} pt), surtout reporte vers le nul.`;
 }
 
-function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, knockoutDrawMemoryAdjustment, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression, homeFavoriteOpenAwayTransfer) {
+function centralDrawBandSummary(adjustment) {
+  if (!adjustment?.available || !adjustment.applied) return '';
+  const side = adjustment.side === 'home' ? 'domicile' : 'exterieur';
+  return ` Memoire nul central : le reliquat ${side} est transfere vers le nul (+${(Number(adjustment.transfer_delta || 0) * 100).toFixed(1)} pt).`;
+}
+
+function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, knockoutDrawMemoryAdjustment, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression, homeFavoriteOpenAwayTransfer, centralDrawBandAdjustment) {
   const ordered = H2H_OUTCOMES.slice().sort((a, b) => h2h[b] - h2h[a]);
   const fav = ordered[0];
   const favName = teamName(match, fav);
@@ -3515,10 +3633,11 @@ function summarize(match, h2h, totals, forced, conf, sources, calibration, teamF
   const homeAwayCompression = homeFavoriteAwayCompressionSummary(homeFavoriteAwayCompression);
   const residualAwayCompression = homeFavoriteResidualAwayCompressionSummary(homeFavoriteResidualAwayCompression);
   const openHomeAwayTransfer = homeFavoriteOpenAwayTransferSummary(homeFavoriteOpenAwayTransfer);
+  const centralDrawBand = centralDrawBandSummary(centralDrawBandAdjustment);
   const learned = calibrationSummary(calibration, regimeCalibration);
   return {
     headline: `${favName} ${h2h[fav] >= 0.5 ? 'net favori Codex' : 'léger avantage Codex'}`,
-    summary: `${lead}${ou}${liveText}${movement}${totalsMove} ${data}${form}${rest}${knockoutRegulation}${homeDrawGuard}${awayDrawCompression}${koDrawFloor}${koDrawMemory}${strongDrawFloor}${strongAwayFollowThrough}${groupOpeningDraw}${forcedOuDraw}${openDrawGuard}${drawFavorite}${homeAwayCompression}${residualAwayCompression}${openHomeAwayTransfer}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
+    summary: `${lead}${ou}${liveText}${movement}${totalsMove} ${data}${form}${rest}${knockoutRegulation}${homeDrawGuard}${awayDrawCompression}${koDrawFloor}${koDrawMemory}${strongDrawFloor}${strongAwayFollowThrough}${groupOpeningDraw}${forcedOuDraw}${openDrawGuard}${drawFavorite}${homeAwayCompression}${residualAwayCompression}${openHomeAwayTransfer}${centralDrawBand}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
   };
 }
 
@@ -3852,6 +3971,8 @@ export function generateCodexOpinion(db, matchId) {
   h2h = applyHomeFavoriteResidualAwayCompression(h2h, homeFavoriteResidualAwayCompression);
   const homeFavoriteOpenAwayTransfer = homeFavoriteOpenAwayTransferPlan(h2h, calibration, !!market, live);
   h2h = applyHomeFavoriteOpenAwayTransfer(h2h, homeFavoriteOpenAwayTransfer);
+  const centralDrawBandAdjustment = centralDrawBandAdjustmentPlan(h2h, calibration, !!market, live);
+  h2h = applyCentralDrawBandAdjustment(h2h, centralDrawBandAdjustment);
   fairOdds = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, impliedOdds(h2h[o])]));
   const forced = bestForcedPick(match, h2h, fairOdds, market, totals, calibration);
   const confidenceContext = confidenceDetails({ market, totals, intel, scorecard, previous, calibration, teamForm, live, marketMovement, probabilities: h2h, forced });
@@ -3946,6 +4067,7 @@ export function generateCodexOpinion(db, matchId) {
     home_favorite_away_compression: homeFavoriteAwayCompression,
     home_favorite_residual_away_compression: homeFavoriteResidualAwayCompression,
     home_favorite_open_away_transfer: homeFavoriteOpenAwayTransfer,
+    central_draw_band_adjustment: centralDrawBandAdjustment,
     market_movement: marketMovement,
     h2h_market_movement_adjustment: marketMovementAdjustment,
     totals_market_movement: totalsMovement,
@@ -3993,10 +4115,10 @@ export function generateCodexOpinion(db, matchId) {
     live_score_changed: liveScoreChanged,
   };
   const changes = changeSummary(previous, sources);
-  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, knockoutDrawMemoryAdjustment, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression, homeFavoriteOpenAwayTransfer);
+  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, knockoutDrawMemoryAdjustment, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression, homeFavoriteOpenAwayTransfer, centralDrawBandAdjustment);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_line_calibrated`,
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_line_calibrated`,
     h2h_books: market?.books || 0,
     prior: prior.context,
     market_movement: marketMovement,
@@ -4053,6 +4175,7 @@ export function generateCodexOpinion(db, matchId) {
     home_favorite_away_compression: homeFavoriteAwayCompression,
     home_favorite_residual_away_compression: homeFavoriteResidualAwayCompression,
     home_favorite_open_away_transfer: homeFavoriteOpenAwayTransfer,
+    central_draw_band_adjustment: centralDrawBandAdjustment,
     live_context: live,
   };
 
