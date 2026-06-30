@@ -81,16 +81,45 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v29');
+  assert.equal(opinion.model_version, 'codex-book-v30');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_group_opening_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
+});
+
+test('generateCodexOpinion : rehausse prudemment le nul des premiers matchs de groupe', () => {
+  const db = freshDb();
+  insertMarket(db);
+
+  const opinion = generateCodexOpinion(db, 1);
+  const adjustment = opinion.diagnostics.group_opening_draw_adjustment;
+
+  assert.equal(adjustment.available, true);
+  assert.equal(adjustment.applied, true);
+  assert.equal(adjustment.matchday, 1);
+  assert.ok(adjustment.draw_delta > 0);
+  assert.ok(opinion.probabilities.draw > adjustment.draw_prob);
+  assert.match(opinion.summary, /Premier match de groupe/);
+});
+
+test('generateCodexOpinion : ne rehausse pas le nul groupe apres la premiere journee', () => {
+  const db = freshDb();
+  db.prepare('UPDATE matches SET matchday = 2 WHERE id = 1').run();
+  insertMarket(db);
+
+  const opinion = generateCodexOpinion(db, 1);
+  const adjustment = opinion.diagnostics.group_opening_draw_adjustment;
+
+  assert.equal(adjustment.available, false);
+  assert.equal(adjustment.applied, false);
+  assert.equal(adjustment.matchday, 2);
+  assert.doesNotMatch(opinion.summary, /Premier match de groupe/);
 });
 
 test('generateCodexOpinion : ignore les lignes Over Under entieres et quart de but', () => {
@@ -184,6 +213,7 @@ test('generateCodexOpinion : se mefie dun Over 1.5 peu profond quand la ligne 2.
 
 test('generateCodexOpinion : favorise le 1X2 quand l O/U est seulement legerement meilleur', () => {
   const db = freshDb();
+  db.prepare('UPDATE matches SET matchday = 2 WHERE id = 1').run();
   for (const bookmaker of ['book-a', 'book-b', 'book-c']) {
     for (const [outcome, price] of [['home', 1.86], ['draw', 3.65], ['away', 4.80]]) {
       db.prepare(`
@@ -451,6 +481,7 @@ test('generateCodexOpinion : ne declenche pas le plancher home renforce sous 70 
 
 test('generateCodexOpinion : ne surcorrige pas les favoris exterieurs forts', () => {
   const db = freshDb();
+  db.prepare('UPDATE matches SET matchday = 2 WHERE id = 1').run();
   for (const [bookmaker, home, draw, away] of [
     ['book-a', 14.00, 6.00, 1.24],
     ['book-b', 13.00, 5.80, 1.26],

@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v29';
+const MODEL_VERSION = 'codex-book-v30';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -1403,6 +1403,57 @@ function applyStrongFavoriteDrawFloorGuard(probs, plan) {
   return normalize(adjusted);
 }
 
+function groupOpeningDrawAdjustmentPlan(match, probs, hasMarket, live) {
+  const openingGroup = match?.stage === 'GROUP' && Number(match?.matchday) === 1;
+  const base = {
+    available: openingGroup && !live?.active,
+    applied: false,
+    stage: match?.stage || null,
+    matchday: match?.matchday ?? null,
+    draw_prob: probs?.draw == null ? null : round(probs.draw),
+    target_draw: null,
+    max_move: null,
+    factor: null,
+    draw_delta: 0,
+    deltas: { home: 0, draw: 0, away: 0 },
+  };
+  if (!openingGroup || live?.active || !validH2h(probs)) return base;
+
+  const drawProb = Number(probs.draw);
+  const targetDraw = 0.31;
+  const factor = 0.8;
+  const maxMove = hasMarket ? 0.018 : 0.014;
+  const drawDelta = clamp(Math.max(0, targetDraw - drawProb) * factor, 0, maxMove);
+  const applied = drawDelta >= 0.003;
+  const sideTotal = Math.max(0.001, Number(probs.home || 0) + Number(probs.away || 0));
+  const deltas = { home: 0, draw: 0, away: 0 };
+  if (applied) {
+    deltas.draw = round(drawDelta);
+    deltas.home = round(-drawDelta * (Number(probs.home || 0) / sideTotal));
+    deltas.away = round(-drawDelta * (Number(probs.away || 0) / sideTotal));
+  }
+
+  return {
+    ...base,
+    draw_prob: round(drawProb),
+    target_draw: round(targetDraw),
+    max_move: round(maxMove),
+    factor: round(factor),
+    draw_delta: applied ? round(drawDelta) : 0,
+    deltas,
+    applied,
+  };
+}
+
+function applyGroupOpeningDrawAdjustment(probs, plan) {
+  if (!plan?.available || !plan.applied) return probs;
+  const adjusted = {};
+  for (const outcome of H2H_OUTCOMES) {
+    adjusted[outcome] = clamp(probs[outcome] + Number(plan.deltas?.[outcome] || 0), 0.025, 0.94);
+  }
+  return normalize(adjusted);
+}
+
 function applyRestTotalsAdjustment(lines, restPlan) {
   const delta = Number(restPlan?.totals_delta || 0);
   if (!restPlan?.available || Math.abs(delta) < 0.0001) {
@@ -2227,6 +2278,7 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
       depth,
       low_depth_over15_caution: 0,
       low_depth_over15_h2h_guard: 0,
+      deep_under_tie_guard: 0,
       synthetic_lean: syntheticLean,
       ou_cross_market_friction: crossMarketFriction,
       edge,
@@ -2250,6 +2302,23 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
     topH2h.choice_score = round(topH2h.choice_score + h2hGuard);
     topH2h.choice_adjustments.low_depth_over15_h2h_guard = h2hGuard;
     ranked = sortCandidates();
+  }
+  const topDeepUnder = ranked.find((candidate) => (
+    candidate.market === 'OU_2.5'
+    && candidate.selection === 'under'
+    && !candidate.synthetic
+    && Number(candidate.source_books || 0) >= 8
+    && Number(candidate.probability || 0) >= 0.535
+  ));
+  if (ranked[0]?.market === '1X2' && topDeepUnder) {
+    const gap = ranked[0].choice_score - topDeepUnder.choice_score;
+    const edgeOk = topDeepUnder.edge == null || ranked[0].edge == null || Number(topDeepUnder.edge) >= Number(ranked[0].edge) - 0.001;
+    if (gap >= 0 && gap <= 0.003 && edgeOk) {
+      const boost = round(gap + 0.0002);
+      topDeepUnder.choice_score = round(topDeepUnder.choice_score + boost);
+      topDeepUnder.choice_adjustments.deep_under_tie_guard = boost;
+      ranked = sortCandidates();
+    }
   }
   ranked[0].alternatives = ranked.slice(1, 5).map(forcedCandidateDiagnostic);
   return ranked[0];
@@ -2444,7 +2513,12 @@ function strongFavoriteDrawFloorGuardSummary(match, adjustment) {
   return ` Plancher favori fort : ${favorite} reste prioritaire, mais le nul est rehausse (+${(Number(adjustment.draw_delta || 0) * 100).toFixed(1)} pt).`;
 }
 
-function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, strongFavoriteDrawFloorGuard) {
+function groupOpeningDrawSummary(adjustment) {
+  if (!adjustment?.available || !adjustment.applied) return '';
+  return ` Premier match de groupe : le nul est legerement rehausse (+${(Number(adjustment.draw_delta || 0) * 100).toFixed(1)} pt), le replay ayant montre un debut de groupe plus prudent.`;
+}
+
+function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, strongFavoriteDrawFloorGuard, groupOpeningDrawAdjustment) {
   const ordered = H2H_OUTCOMES.slice().sort((a, b) => h2h[b] - h2h[a]);
   const fav = ordered[0];
   const favName = teamName(match, fav);
@@ -2470,10 +2544,11 @@ function summarize(match, h2h, totals, forced, conf, sources, calibration, teamF
   const awayDrawCompression = awayFavoriteDrawCompressionSummary(match, awayFavoriteDrawCompression);
   const koDrawFloor = knockoutDrawFloorGuardSummary(match, knockoutDrawFloorGuard);
   const strongDrawFloor = strongFavoriteDrawFloorGuardSummary(match, strongFavoriteDrawFloorGuard);
+  const groupOpeningDraw = groupOpeningDrawSummary(groupOpeningDrawAdjustment);
   const learned = calibrationSummary(calibration, regimeCalibration);
   return {
     headline: `${favName} ${h2h[fav] >= 0.5 ? 'net favori Codex' : 'léger avantage Codex'}`,
-    summary: `${lead}${ou}${liveText}${movement}${totalsMove} ${data}${form}${rest}${knockoutRegulation}${homeDrawGuard}${awayDrawCompression}${koDrawFloor}${strongDrawFloor}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
+    summary: `${lead}${ou}${liveText}${movement}${totalsMove} ${data}${form}${rest}${knockoutRegulation}${homeDrawGuard}${awayDrawCompression}${koDrawFloor}${strongDrawFloor}${groupOpeningDraw}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
   };
 }
 
@@ -2751,6 +2826,8 @@ export function generateCodexOpinion(db, matchId) {
   h2h = applyKnockoutDrawFloorGuard(h2h, knockoutDrawFloorGuard);
   const strongFavoriteDrawFloorGuard = strongFavoriteDrawFloorGuardPlan(match, h2h, !!market, live);
   h2h = applyStrongFavoriteDrawFloorGuard(h2h, strongFavoriteDrawFloorGuard);
+  const groupOpeningDrawAdjustment = groupOpeningDrawAdjustmentPlan(match, h2h, !!market, live);
+  h2h = applyGroupOpeningDrawAdjustment(h2h, groupOpeningDrawAdjustment);
   h2h = applyLiveH2hAdjustment(h2h, live);
 
   const rawTotals = totalsMarkets(odds);
@@ -2857,6 +2934,7 @@ export function generateCodexOpinion(db, matchId) {
     away_favorite_draw_compression: awayFavoriteDrawCompression,
     knockout_draw_floor_guard: knockoutDrawFloorGuard,
     strong_favorite_draw_floor_guard: strongFavoriteDrawFloorGuard,
+    group_opening_draw_adjustment: groupOpeningDrawAdjustment,
     market_movement: marketMovement,
     h2h_market_movement_adjustment: marketMovementAdjustment,
     totals_market_movement: totalsMovement,
@@ -2900,10 +2978,10 @@ export function generateCodexOpinion(db, matchId) {
     live_score_changed: liveScoreChanged,
   };
   const changes = changeSummary(previous, sources);
-  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, strongFavoriteDrawFloorGuard);
+  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, strongFavoriteDrawFloorGuard, groupOpeningDrawAdjustment);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_knockout90_power_rating_regime_draw_guard_calibrated`,
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_group_opening_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_knockout90_power_rating_regime_draw_guard_group_opening_calibrated`,
     h2h_books: market?.books || 0,
     prior: prior.context,
     market_movement: marketMovement,
@@ -2947,6 +3025,7 @@ export function generateCodexOpinion(db, matchId) {
     away_favorite_draw_compression: awayFavoriteDrawCompression,
     knockout_draw_floor_guard: knockoutDrawFloorGuard,
     strong_favorite_draw_floor_guard: strongFavoriteDrawFloorGuard,
+    group_opening_draw_adjustment: groupOpeningDrawAdjustment,
     live_context: live,
   };
 
