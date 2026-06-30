@@ -109,7 +109,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw_conviction_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_under_home95_awaytail55_awaymod60_over_home40_overaway45_topdrawsteam70_top_cap_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw_conviction_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail55_awaymod60_over_home40_overaway45_topdrawsteam70_top_cap_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -383,6 +383,41 @@ test('generateCodexOpinion : corrige le 1X2 des choix O/U avec la memoire histor
   assert.ok(adjustment.deltas.home > 0);
   assert.ok(adjustment.deltas.away < 0);
   assert.match(opinion.summary, /Calibration O\/U -> 1X2/);
+});
+
+test('generateCodexOpinion : ne deplace pas un O/U 1.5 vers domicile quand le nul est deja central', () => {
+  const db = freshDb();
+  for (let id = 2; id <= 11; id += 1) {
+    insertFinishedMatch(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      homeScore: 1,
+      awayScore: 0,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-10T00:00:00Z',
+      modelVersion: 'codex-book-v64',
+      probabilities: { home: 0.30, draw: 0.42, away: 0.28 },
+      totals: [{ line: 1.5, probs: { over: 0.62, under: 0.38 }, fair_odds: { over: 1.61, under: 2.63 }, synthetic: false }],
+      forcedMarket: 'OU_1.5',
+      forcedSelection: 'over',
+      confidenceScore: 45,
+    });
+  }
+  insertH2hOdds(db, [['home', 3.15], ['draw', 2.70], ['away', 3.15]]);
+  insertTotalOdds(db, 1.5, 1.45, 3.00, { bookmakers: Array.from({ length: 10 }, (_, index) => `book-${index}`) });
+
+  const opinion = generateCodexOpinion(db, 1);
+  const adjustment = opinion.diagnostics.final_ou_h2h_calibration;
+
+  assert.equal(opinion.forced_pick_market, 'OU_1.5');
+  assert.equal(opinion.forced_pick_selection, 'over');
+  assert.equal(adjustment.available, true);
+  assert.equal(adjustment.top_outcome, 'draw');
+  assert.equal(adjustment.applied, false);
+  assert.equal(adjustment.transfer_delta, 0);
+  assert.equal(opinion.probabilities.draw > opinion.probabilities.home, true);
 });
 
 test('generateCodexOpinion : force le nul J2 entre deux vainqueurs avec favori domicile tres bas cote', () => {
