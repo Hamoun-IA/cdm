@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v77';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v78';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -2785,10 +2785,15 @@ function applyForcedScenarioAlignment(probs, plan) {
   return normalize(adjusted);
 }
 
+function finalOuH2hDrawShare(selection, topOutcome = null) {
+  if (selection === 'under') return 0.85;
+  if (selection === 'over') return topOutcome === 'home' ? 0.40 : 0.05;
+  return 0.5;
+}
+
 function finalOuH2hUncertaintyPlan(probs, forced, live) {
   const targetTopProbability = 0.30;
-  const drawShare = forced?.selection === 'under' ? 0.85 : (forced?.selection === 'over' ? 0.05 : 0.5);
-  const oppositeShare = round(1 - drawShare);
+  const defaultDrawShare = finalOuH2hDrawShare(forced?.selection);
   const base = {
     available: !live?.active,
     applied: false,
@@ -2805,8 +2810,8 @@ function finalOuH2hUncertaintyPlan(probs, forced, live) {
     threshold: targetTopProbability,
     slope: 1,
     max_move: 0.36,
-    draw_share: drawShare,
-    opposite_share: oppositeShare,
+    draw_share: defaultDrawShare,
+    opposite_share: round(1 - defaultDrawShare),
     transfer_delta: 0,
     deltas: { home: 0, draw: 0, away: 0 },
   };
@@ -2817,12 +2822,16 @@ function finalOuH2hUncertaintyPlan(probs, forced, live) {
   const favoriteProb = Number(probs[favorite] || 0);
   const topOutcome = H2H_OUTCOMES.slice().sort((a, b) => probs[b] - probs[a])[0];
   const topProbability = Number(probs[topOutcome] || 0);
+  const drawShare = finalOuH2hDrawShare(forced?.selection, topOutcome);
+  const oppositeShare = round(1 - drawShare);
   const withContext = {
     ...base,
     favorite,
     favorite_prob: round(favoriteProb),
     top_outcome: topOutcome,
     top_probability: round(topProbability),
+    draw_share: drawShare,
+    opposite_share: oppositeShare,
   };
   if (!finalOu || topProbability <= targetTopProbability + 0.003) {
     return withContext;
@@ -5358,7 +5367,7 @@ export function generateCodexOpinion(db, matchId) {
   const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, knockoutDrawMemoryAdjustment, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression, homeFavoriteOpenAwayTransfer, centralDrawBandAdjustment, strongFavoriteDrawTail, teamFormContrarianDrawGuard, forcedDrawConviction, forcedScenarioAlignment, finalOuH2hUncertainty);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away30_forced_draw_conviction_team_form_contrarian_draw345_forced_scenario_alignment_final_ou_split_30_top_cap_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away30_forced_draw_conviction_team_form_contrarian_draw345_forced_scenario_alignment_final_ou_split_30_top_cap_line_calibrated`,
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away30_forced_draw_conviction_team_form_contrarian_draw345_forced_scenario_alignment_final_ou_split_30_over_home40_top_cap_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away30_forced_draw_conviction_team_form_contrarian_draw345_forced_scenario_alignment_final_ou_split_30_over_home40_top_cap_line_calibrated`,
     h2h_books: market?.books || 0,
     prior: prior.context,
     market_movement: marketMovement,

@@ -109,7 +109,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away30_forced_draw_conviction_team_form_contrarian_draw345_forced_scenario_alignment_final_ou_split_30_top_cap_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away30_forced_draw_conviction_team_form_contrarian_draw345_forced_scenario_alignment_final_ou_split_30_over_home40_top_cap_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -435,8 +435,8 @@ test('generateCodexOpinion : redistribue un choix Over vers le scenario oppose p
   assert.equal(uncertainty.available, true);
   assert.equal(uncertainty.applied, true);
   assert.equal(uncertainty.top_outcome, 'home');
-  assert.equal(uncertainty.draw_share, 0.05);
-  assert.equal(uncertainty.opposite_share, 0.95);
+  assert.equal(uncertainty.draw_share, 0.4);
+  assert.equal(uncertainty.opposite_share, 0.6);
   assert.ok(uncertainty.deltas.away > uncertainty.deltas.draw);
   assert.ok(opinion.probabilities.home <= 0.35);
 });
