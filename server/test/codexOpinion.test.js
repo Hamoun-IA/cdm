@@ -971,6 +971,31 @@ test('codexOpinionHistory : expose les plus gros ecarts probabilistes', () => {
   assert.ok(alert.brier_score > 1);
 });
 
+test('codexOpinionHistory : ne classe pas un O/U gagnant comme zone faible sur Brier 1X2 seul', () => {
+  const db = freshDb();
+  for (const id of [2, 3, 4]) {
+    db.prepare(`
+      INSERT INTO matches (id, fifa_match_number, stage, group_code, matchday, kickoff_utc, home_team_id, away_team_id, status, home_score, away_score)
+      VALUES (@id, @id, 'GROUP', 'A', 1, '2026-06-12T19:00:00Z', 1, 2, 'FINISHED', 1, 0)
+    `).run({ id });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-12T08:00:00Z',
+      probabilities: { home: 0.12, draw: 0.18, away: 0.70 },
+      forcedMarket: 'OU_2.5',
+      forcedSelection: 'under',
+    });
+  }
+
+  const history = codexOpinionHistory(db);
+  const ouMetric = history.audit.by_market.find((metric) => metric.key === 'OU_2.5');
+
+  assert.equal(ouMetric.hit_rate, 1);
+  assert.ok(ouMetric.average_brier > 0.9);
+  assert.equal(history.audit.weak_segments.some((segment) => segment.key === 'OU_2.5'), false);
+  assert.ok(history.audit.probability_alerts.some((alert) => alert.forced_pick_market === 'OU_2.5'));
+});
+
 test('generateCodexOpinion : fonctionne sans cotes avec priors conservateurs', () => {
   const db = freshDb();
   const opinion = generateCodexOpinion(db, 1);

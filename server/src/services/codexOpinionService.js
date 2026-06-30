@@ -4285,6 +4285,24 @@ function groupedAudit(opinions, keyFn) {
     .sort((a, b) => b.n - a.n || String(a.key).localeCompare(String(b.key)));
 }
 
+function withAuditKind(kind, metrics) {
+  return metrics.map((metric) => ({ ...metric, audit_kind: kind }));
+}
+
+function isTotalsMarketKey(key) {
+  return String(key || '').startsWith('OU_');
+}
+
+function isWeakAuditSegment(metric) {
+  if (!metric || metric.n < 3) return false;
+  const hitRateWeak = metric.hit_rate != null && metric.hit_rate < 0.55;
+  const brierWeak = metric.average_brier != null && metric.average_brier > 0.55;
+  if (metric.audit_kind === 'market' && isTotalsMarketKey(metric.key)) {
+    return hitRateWeak;
+  }
+  return hitRateWeak || brierWeak;
+}
+
 function auditStageLabel(match) {
   if (!match) return 'Stage inconnu';
   return match.stage === 'GROUP' ? `Groupe J${match.matchday}` : (match.stage || 'Stage inconnu');
@@ -4365,11 +4383,12 @@ function codexHistoryAudit(matches) {
     return match.stage === 'GROUP' ? `Groupe J${match.matchday}` : (match.stage || 'Stage inconnu');
   });
   const byConfidence = groupedAudit(latestPrematch, (opinion) => confidenceBand(opinion.confidence_score));
-  const weakSegments = [...byMarket, ...byStage, ...byConfidence]
-    .filter((metric) => metric.n >= 3 && (
-      (metric.hit_rate != null && metric.hit_rate < 0.55) ||
-      (metric.average_brier != null && metric.average_brier > 0.55)
-    ))
+  const weakSegments = [
+    ...withAuditKind('market', byMarket),
+    ...withAuditKind('stage', byStage),
+    ...withAuditKind('confidence', byConfidence),
+  ]
+    .filter(isWeakAuditSegment)
     .sort((a, b) => {
       const brierGap = (b.average_brier ?? 0) - (a.average_brier ?? 0);
       if (Math.abs(brierGap) > 0.0001) return brierGap;

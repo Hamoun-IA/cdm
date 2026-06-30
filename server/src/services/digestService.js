@@ -37,6 +37,7 @@ function compactAuditMetric(metric) {
   if (!metric) return null;
   return {
     key: metric.key,
+    audit_kind: metric.audit_kind,
     n: metric.n,
     hit_rate: metric.hit_rate,
     favorite_hit_rate: metric.favorite_hit_rate,
