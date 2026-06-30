@@ -157,6 +157,33 @@ test('generateCodexOpinion : rehausse davantage le nul J1 quand un favori fort o
   assert.ok(opinion.probabilities.draw > adjustment.draw_prob);
 });
 
+test('generateCodexOpinion : force le nul J1 sur favori domicile compresse et nul soutenu par le marche', () => {
+  const db = freshDb();
+  for (const bookmaker of ['book-a', 'book-b']) {
+    for (const [outcome, price] of [['home', 1.64], ['draw', 3.70], ['away', 8.00]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+    for (const [side, price] of [['over', 2.23], ['under', 1.76]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, point, price, taken_at)
+        VALUES (1, @bookmaker, 'totals', @outcome, 2.5, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome: `${side}_2.5`, price });
+    }
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const forced = opinion.diagnostics.forced_choice;
+
+  assert.equal(forced.preliminary_market, '1X2');
+  assert.equal(forced.market, '1X2');
+  assert.equal(forced.selection, 'draw');
+  assert.ok(opinion.probabilities.home > opinion.probabilities.draw);
+  assert.ok(forced.choice_adjustments.opening_home_draw_position_guard > 0);
+});
+
 test('generateCodexOpinion : ne rehausse pas le nul groupe apres la premiere journee', () => {
   const db = freshDb();
   db.prepare('UPDATE matches SET matchday = 2 WHERE id = 1').run();
