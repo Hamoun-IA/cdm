@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v81';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v82';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -2590,9 +2590,9 @@ function teamFormContrarianDrawGuardPlan(match, probs, teamForm, live) {
     && favoriteDelta <= -1.1
     && opponentDelta >= 0.6
     && opponentDelta - favoriteDelta >= 1.7;
-  const targetDraw = strongContrarianProfile ? 0.40 : base.target_draw;
-  const maxMove = strongContrarianProfile ? 0.13 : base.max_move;
-  const favoriteFloor = strongContrarianProfile ? 0.54 : base.favorite_floor;
+  const targetDraw = strongContrarianProfile ? 0.45 : base.target_draw;
+  const maxMove = strongContrarianProfile ? 0.18 : base.max_move;
+  const favoriteFloor = strongContrarianProfile ? 0.50 : base.favorite_floor;
   const profile = strongContrarianProfile ? 'strong_contrarian_side_favorite' : 'standard_contrarian_side_favorite';
   const withContext = {
     ...base,
@@ -4385,7 +4385,7 @@ function confidenceDetails({ match, market, totals, intel, scorecard, previous, 
       Number(sideForm?.played || 0) >= 1 &&
       Number(opponentForm?.played || 0) >= 1 &&
       Number(sideForm?.points) === Number(opponentForm?.points) &&
-      forcedProbability >= 0.54 &&
+      forcedProbability >= 0.50 &&
       Number.isFinite(sideDelta) &&
       Number.isFinite(opponentDelta) &&
       sideDelta <= -0.9 &&
@@ -5448,7 +5448,7 @@ export function generateCodexOpinion(db, matchId) {
   const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, knockoutDrawMemoryAdjustment, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression, homeFavoriteOpenAwayTransfer, centralDrawBandAdjustment, strongFavoriteDrawTail, teamFormContrarianDrawGuard, forcedDrawConviction, forcedScenarioAlignment, finalOuH2hUncertainty);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw_conviction_team_form_contrarian_draw40_forced_scenario_alignment_final_ou_split_30_under_home95_awaytail55_awaymod60_over_home40_overaway45_topdrawsteam70_top_cap_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw_conviction_team_form_contrarian_draw40_forced_scenario_alignment_final_ou_split_30_under_home95_awaytail55_awaymod60_over_home40_overaway45_topdrawsteam70_top_cap_line_calibrated`,
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw_conviction_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_under_home95_awaytail55_awaymod60_over_home40_overaway45_topdrawsteam70_top_cap_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw_conviction_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_under_home95_awaytail55_awaymod60_over_home40_overaway45_topdrawsteam70_top_cap_line_calibrated`,
     h2h_books: market?.books || 0,
     prior: prior.context,
     market_movement: marketMovement,
