@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v78';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v79';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -2503,7 +2503,7 @@ function strongFavoriteDrawTailPlan(match, probs, teamForm, live) {
   const context = openingGroup ? 'group_opening_extreme_favorite' : (contrarianGroupJ2 ? 'group_j2_contrarian_extreme_favorite' : null);
   const openingAwayFavorite = context === 'group_opening_extreme_favorite' && favorite === 'away';
   const targetDraw = openingAwayFavorite ? 0.30 : base.target_draw;
-  const maxMove = openingAwayFavorite ? 0.065 : base.max_move;
+  const maxMove = openingAwayFavorite ? 0.105 : base.max_move;
 
   if (!context || favoriteProb < base.min_favorite_prob || drawProb > base.max_draw_prob) {
     return {
@@ -2786,7 +2786,7 @@ function applyForcedScenarioAlignment(probs, plan) {
 }
 
 function finalOuH2hDrawShare(selection, topOutcome = null) {
-  if (selection === 'under') return 0.85;
+  if (selection === 'under') return topOutcome === 'home' ? 0.95 : 0.85;
   if (selection === 'over') return topOutcome === 'home' ? 0.40 : 0.05;
   return 0.5;
 }
@@ -5367,7 +5367,7 @@ export function generateCodexOpinion(db, matchId) {
   const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, knockoutDrawMemoryAdjustment, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression, homeFavoriteOpenAwayTransfer, centralDrawBandAdjustment, strongFavoriteDrawTail, teamFormContrarianDrawGuard, forcedDrawConviction, forcedScenarioAlignment, finalOuH2hUncertainty);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away30_forced_draw_conviction_team_form_contrarian_draw345_forced_scenario_alignment_final_ou_split_30_over_home40_top_cap_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away30_forced_draw_conviction_team_form_contrarian_draw345_forced_scenario_alignment_final_ou_split_30_over_home40_top_cap_line_calibrated`,
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away30x105_forced_draw_conviction_team_form_contrarian_draw345_forced_scenario_alignment_final_ou_split_30_under_home95_over_home40_top_cap_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away30x105_forced_draw_conviction_team_form_contrarian_draw345_forced_scenario_alignment_final_ou_split_30_under_home95_over_home40_top_cap_line_calibrated`,
     h2h_books: market?.books || 0,
     prior: prior.context,
     market_movement: marketMovement,

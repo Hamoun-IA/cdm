@@ -109,7 +109,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away30_forced_draw_conviction_team_form_contrarian_draw345_forced_scenario_alignment_final_ou_split_30_over_home40_top_cap_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away30x105_forced_draw_conviction_team_form_contrarian_draw345_forced_scenario_alignment_final_ou_split_30_under_home95_over_home40_top_cap_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -421,6 +421,27 @@ test('generateCodexOpinion : bascule un favori exterieur J1 moyen vers Under 2.5
   assert.match(opinion.summary, /Choix O\/U final/);
 });
 
+test('generateCodexOpinion : redistribue un Under final top domicile presque tout vers le nul', () => {
+  const db = freshDb();
+  const bookmakers = ['book-a', 'book-b', 'book-c', 'book-d'];
+  insertH2hOdds(db, [['home', 1.85], ['draw', 3.60], ['away', 4.80]], { bookmakers });
+  insertTotalOdds(db, 2.5, 2.25, 1.70, { bookmakers });
+
+  const opinion = generateCodexOpinion(db, 1);
+  const forced = opinion.diagnostics.forced_choice;
+  const uncertainty = opinion.diagnostics.final_ou_h2h_uncertainty;
+
+  assert.equal(forced.market, 'OU_2.5');
+  assert.equal(forced.selection, 'under');
+  assert.equal(uncertainty.available, true);
+  assert.equal(uncertainty.applied, true);
+  assert.equal(uncertainty.top_outcome, 'home');
+  assert.equal(uncertainty.draw_share, 0.95);
+  assert.equal(uncertainty.opposite_share, 0.05);
+  assert.ok(uncertainty.deltas.draw > uncertainty.deltas.away * 10);
+  assert.ok(opinion.probabilities.draw > opinion.probabilities.home);
+});
+
 test('generateCodexOpinion : redistribue un choix Over vers le scenario oppose plus que vers le nul', () => {
   const db = freshDb();
   insertH2hOdds(db, [['home', 1.90], ['draw', 3.70], ['away', 4.10]]);
@@ -457,7 +478,7 @@ test('generateCodexOpinion : releve la queue de nul dun favori extreme en ouvert
   assert.equal(adjustment.context, 'group_opening_extreme_favorite');
   assert.equal(adjustment.favorite, 'away');
   assert.equal(adjustment.target_draw, 0.3);
-  assert.equal(adjustment.max_move, 0.065);
+  assert.equal(adjustment.max_move, 0.105);
   assert.ok(adjustment.favorite_prob >= 0.68);
   assert.ok(adjustment.draw_delta > 0);
   assert.ok(opinion.probabilities.draw > adjustment.draw_prob);
