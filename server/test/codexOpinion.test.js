@@ -67,13 +67,13 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v10');
+  assert.equal(opinion.model_version, 'codex-book-v11');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_power_rating_regime_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_power_rating_regime_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -260,6 +260,38 @@ test('generateCodexOpinion : sans cotes en KO, neutralise le prior domicile et r
   assert.ok(opinion.probabilities.home - opinion.probabilities.away < 0.03);
   assert.equal(opinion.totals[0].synthetic, true);
   assert.ok(opinion.totals[0].probs.over < 0.5);
+});
+
+test('generateCodexOpinion : en KO sans cotes, integre l ecart de recuperation', () => {
+  const db = freshDb();
+  db.prepare("UPDATE matches SET stage = 'R32', group_code = NULL, matchday = NULL, kickoff_utc = '2026-06-15T20:00:00Z' WHERE id = 1").run();
+  db.prepare("INSERT INTO teams (id, fifa_code, name, group_code) VALUES (3,'AAA','Alpha','B'), (4,'BBB','Beta','B')").run();
+  insertTeamResult(db, {
+    id: 2,
+    kickoff: '2026-06-10T20:00:00Z',
+    home: 1,
+    away: 3,
+    homeScore: 1,
+    awayScore: 1,
+  });
+  insertTeamResult(db, {
+    id: 3,
+    kickoff: '2026-06-13T20:00:00Z',
+    home: 2,
+    away: 4,
+    homeScore: 1,
+    awayScore: 1,
+  });
+
+  const opinion = generateCodexOpinion(db, 1);
+
+  assert.equal(opinion.diagnostics.rest_context.available, true);
+  assert.equal(opinion.diagnostics.rest_context.adjustment.side, 'home');
+  assert.ok(opinion.diagnostics.rest_context.adjustment.side_delta > 0);
+  assert.ok(opinion.diagnostics.rest_context.adjustment.draw_delta > 0);
+  assert.ok(opinion.totals[0].rest_delta < 0);
+  assert.ok(opinion.probabilities.home > opinion.probabilities.away);
+  assert.match(opinion.summary, /Recuperation KO/);
 });
 
 test('generateCodexOpinion : sans cotes, renforce la forme tournoi et pénalise les O/U synthétiques', () => {

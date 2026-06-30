@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v10';
+const MODEL_VERSION = 'codex-book-v11';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -849,6 +849,117 @@ function applyTeamFormTotals(lines, form) {
   });
 }
 
+function daysBetween(laterUtc, earlierUtc) {
+  if (!laterUtc || !earlierUtc) return null;
+  const later = new Date(laterUtc).getTime();
+  const earlier = new Date(earlierUtc).getTime();
+  if (!Number.isFinite(later) || !Number.isFinite(earlier) || later <= earlier) return null;
+  return (later - earlier) / 86400000;
+}
+
+function knockoutRestContext(match, form) {
+  const knockout = !!(match.stage && match.stage !== 'GROUP');
+  const homeRest = daysBetween(match.kickoff_utc, form?.home?.latest_match_at);
+  const awayRest = daysBetween(match.kickoff_utc, form?.away?.latest_match_at);
+  const available = knockout && Number.isFinite(homeRest) && Number.isFinite(awayRest);
+  const restDiff = available ? homeRest - awayRest : null;
+  const minRest = available ? Math.min(homeRest, awayRest) : null;
+  const avgRest = available ? (homeRest + awayRest) / 2 : null;
+  return {
+    available,
+    knockout,
+    stage: match.stage,
+    home_latest_match_at: form?.home?.latest_match_at || null,
+    away_latest_match_at: form?.away?.latest_match_at || null,
+    home_rest_days: Number.isFinite(homeRest) ? round(homeRest, 2) : null,
+    away_rest_days: Number.isFinite(awayRest) ? round(awayRest, 2) : null,
+    rest_diff_days: Number.isFinite(restDiff) ? round(restDiff, 2) : null,
+    min_rest_days: Number.isFinite(minRest) ? round(minRest, 2) : null,
+    avg_rest_days: Number.isFinite(avgRest) ? round(avgRest, 2) : null,
+    latest_match_at: latestTimestamp(form?.home?.latest_match_at, form?.away?.latest_match_at),
+  };
+}
+
+function restAdjustmentPlan(rest, hasMarket) {
+  if (!rest?.available) {
+    return {
+      available: false,
+      market_scale: null,
+      side: null,
+      side_delta: 0,
+      draw_delta: 0,
+      totals_delta: 0,
+      applied: false,
+    };
+  }
+  const marketScale = hasMarket ? 0.55 : 1.25;
+  const diffDays = Number(rest.rest_diff_days || 0);
+  const advantageDays = Math.max(0, Math.abs(diffDays) - 0.35);
+  const sideDelta = clamp(Math.sign(diffDays) * advantageDays * 0.0055 * marketScale, -0.018, 0.018);
+  const minRest = Number(rest.min_rest_days || 0);
+  const avgRest = Number(rest.avg_rest_days || 0);
+  const drawDelta = clamp(Math.max(0, 4.15 - minRest) * 0.006 * marketScale, 0, hasMarket ? 0.006 : 0.012);
+  const totalsDelta = -clamp(
+    (Math.max(0, 4.35 - avgRest) * 0.007 + Math.max(0, 3.85 - minRest) * 0.004) * marketScale,
+    0,
+    hasMarket ? 0.008 : 0.016
+  );
+  return {
+    available: true,
+    market_scale: round(marketScale, 2),
+    side: Math.abs(sideDelta) >= 0.001 ? (sideDelta > 0 ? 'home' : 'away') : null,
+    side_delta: round(sideDelta),
+    draw_delta: round(drawDelta),
+    totals_delta: round(totalsDelta),
+    applied: Math.abs(sideDelta) >= 0.001 || drawDelta >= 0.001 || Math.abs(totalsDelta) >= 0.001,
+  };
+}
+
+function applyRestH2hAdjustment(probs, restPlan) {
+  if (!restPlan?.available || !restPlan.applied) return probs;
+  const out = { ...probs };
+  const sideDelta = Number(restPlan.side_delta || 0);
+  if (Math.abs(sideDelta) >= 0.0001) {
+    if (sideDelta > 0) {
+      out.home += sideDelta;
+      out.draw -= sideDelta * 0.25;
+      out.away -= sideDelta * 0.75;
+    } else {
+      const d = Math.abs(sideDelta);
+      out.away += d;
+      out.draw -= d * 0.25;
+      out.home -= d * 0.75;
+    }
+  }
+  const drawDelta = Number(restPlan.draw_delta || 0);
+  if (drawDelta >= 0.0001) {
+    const sideTotal = Math.max(0.001, out.home + out.away);
+    out.draw += drawDelta;
+    out.home -= drawDelta * (out.home / sideTotal);
+    out.away -= drawDelta * (out.away / sideTotal);
+  }
+  return normalize(Object.fromEntries(Object.entries(out).map(([k, v]) => [k, clamp(v, 0.025, 0.94)])));
+}
+
+function applyRestTotalsAdjustment(lines, restPlan) {
+  const delta = Number(restPlan?.totals_delta || 0);
+  if (!restPlan?.available || Math.abs(delta) < 0.0001) {
+    return lines.map((line) => ({ ...line, rest_delta: 0 }));
+  }
+  return lines.map((line) => {
+    const over = clamp(line.probs.over + delta, 0.05, 0.95);
+    const probs = normalize({ over, under: 1 - over });
+    return {
+      ...line,
+      probs,
+      fair_odds: { over: impliedOdds(probs.over), under: impliedOdds(probs.under) },
+      lean: probs.over >= probs.under ? 'over' : 'under',
+      rest_adjusted: true,
+      rest_delta: round(delta),
+    };
+  });
+}
+
 function liveContext(match) {
   const active = LIVE_STATUSES.includes(match.status);
   const homeScore = match.home_score == null ? null : Number(match.home_score);
@@ -1511,6 +1622,7 @@ function changeSummary(previous, sources) {
   if (sources.latest_odds_at && sources.latest_odds_at > previous.generated_at) changed.push('cotes');
   if (sources.latest_calibration_result_at && sources.latest_calibration_result_at > previous.generated_at) changed.push('résultats précédents');
   if (sources.latest_team_form_match_at && sources.latest_team_form_match_at > previous.generated_at) changed.push('forme tournoi');
+  if (sources.latest_rest_context_at && sources.latest_rest_context_at > previous.generated_at) changed.push('recuperation KO');
   if (sources.latest_tournament_goals_at && sources.latest_tournament_goals_at > previous.generated_at) changed.push('rythme buts tournoi');
   if (sources.latest_market_movement_at && sources.latest_market_movement_at > previous.generated_at) changed.push('mouvement marché');
   if (sources.latest_totals_market_movement_at && sources.latest_totals_market_movement_at > previous.generated_at) changed.push('mouvement O/U');
@@ -1600,7 +1712,25 @@ function tournamentGoalsSummary(goalsContext, totals) {
   return ` Rythme buts tournoi intégré : ${goalsContext.avg_goals} buts/match sur ${goalsContext.matches} matchs, signal ${dir} appliqué prudemment aux lignes O/U.`;
 }
 
-function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment) {
+function restContextSummary(match, rest, restAdjustment) {
+  if (!rest?.available || !restAdjustment?.applied) return '';
+  const parts = [];
+  if (restAdjustment.side && Math.abs(Number(restAdjustment.side_delta || 0)) >= 0.004) {
+    const sideName = teamName(match, restAdjustment.side);
+    const diff = Math.abs(Number(rest.rest_diff_days || 0));
+    parts.push(`${sideName} a environ ${diff.toFixed(1)} j de recuperation en plus`);
+  }
+  if (Number(restAdjustment.draw_delta || 0) >= 0.004) {
+    parts.push('recuperation courte, nul 90 min legerement rehausse');
+  }
+  if (Number(restAdjustment.totals_delta || 0) <= -0.004) {
+    parts.push('rythme buts un peu amorti');
+  }
+  if (!parts.length) return '';
+  return ` Recuperation KO integree : ${parts.join('; ')}.`;
+}
+
+function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment) {
   const ordered = H2H_OUTCOMES.slice().sort((a, b) => h2h[b] - h2h[a]);
   const fav = ordered[0];
   const favName = teamName(match, fav);
@@ -1620,10 +1750,11 @@ function summarize(match, h2h, totals, forced, conf, sources, calibration, teamF
   const totalsMove = totalsMovementSummary(totalsMovement);
   const depth = totalsDepthSummary(totals);
   const goalsPace = tournamentGoalsSummary(goalsContext, totals);
+  const rest = restContextSummary(match, restContext, restAdjustment);
   const learned = calibrationSummary(calibration, regimeCalibration);
   return {
     headline: `${favName} ${h2h[fav] >= 0.5 ? 'net favori Codex' : 'léger avantage Codex'}`,
-    summary: `${lead}${ou}${liveText}${movement}${totalsMove} ${data}${form}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
+    summary: `${lead}${ou}${liveText}${movement}${totalsMove} ${data}${form}${rest}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
   };
 }
 
@@ -1876,6 +2007,8 @@ export function generateCodexOpinion(db, matchId) {
   const marketMovement = h2hMarketMovement(odds);
   const totalsMovement = totalsMarketMovement(odds);
   const teamFormAdjustment = teamFormAdjustmentPlan(teamForm, !!market);
+  const restContext = knockoutRestContext(match, teamForm);
+  const restAdjustment = restAdjustmentPlan(restContext, !!market);
   const prior = priorFromMatchContext(match, market);
   const base = prior.probs;
   const suggestion = pickSuggestion(suggestions);
@@ -1883,6 +2016,7 @@ export function generateCodexOpinion(db, matchId) {
   const favorite = H2H_OUTCOMES.reduce((acc, o) => h2h[o] > h2h[acc] ? o : acc, 'home');
   h2h = applyQualitativeAdjustments(h2h, { favorite, scorecard, decision });
   h2h = applyTeamFormAdjustment(h2h, teamForm, teamFormAdjustment);
+  h2h = applyRestH2hAdjustment(h2h, restAdjustment);
   h2h = applyHistoricalCalibration(h2h, calibration);
   const regimeCalibration = applyRegimeCalibration(h2h, calibration);
   h2h = regimeCalibration.probs;
@@ -1897,9 +2031,12 @@ export function generateCodexOpinion(db, matchId) {
     applyTotalsMarketMovement(
       applyTotalsCalibration(
         applyTournamentGoalsTotals(
-          applyTeamFormTotals(
-            adjustTotals(totalsInput, scorecard),
-            teamForm
+          applyRestTotalsAdjustment(
+            applyTeamFormTotals(
+              adjustTotals(totalsInput, scorecard),
+              teamForm
+            ),
+            restAdjustment
           ),
           goalsContext
         ),
@@ -1973,6 +2110,10 @@ export function generateCodexOpinion(db, matchId) {
       h2h_delta: teamForm.h2h_delta,
       totals_delta: teamForm.totals_delta,
     },
+    rest_context: {
+      ...restContext,
+      adjustment: restAdjustment,
+    },
     market_movement: marketMovement,
     totals_market_movement: totalsMovement,
     tournament_goals: goalsContext,
@@ -1984,6 +2125,7 @@ export function generateCodexOpinion(db, matchId) {
       t.totals_calibration_delta ?? 0,
       t.tournament_goals_delta ?? 0,
       t.totals_market_movement_delta ?? 0,
+      t.rest_delta ?? 0,
     ]),
     forced_choice: {
       market: forced.market,
@@ -2005,6 +2147,7 @@ export function generateCodexOpinion(db, matchId) {
     latest_calibration_result_at: calibration.latest_result_at,
     latest_team_form_match_at: teamForm.latest_match_at,
     team_form_adjustment: teamFormAdjustment,
+    latest_rest_context_at: restContext.available ? restContext.latest_match_at : null,
     latest_tournament_goals_at: goalsContext.available ? goalsContext.latest_match_at : null,
     latest_market_movement_at: marketMovement.available ? marketMovement.latest_at : null,
     latest_totals_market_movement_at: totalsMovement.available ? totalsMovement.latest_at : null,
@@ -2012,10 +2155,10 @@ export function generateCodexOpinion(db, matchId) {
     live_score_changed: liveScoreChanged,
   };
   const changes = changeSummary(previous, sources);
-  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment);
+  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_power_rating_regime_calibrated' : `${prior.context.source}_plus_marketless_team_form_boost_power_rating_regime_calibrated`,
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_power_rating_regime_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_power_rating_regime_calibrated`,
     h2h_books: market?.books || 0,
     prior: prior.context,
     market_movement: marketMovement,
@@ -2030,6 +2173,8 @@ export function generateCodexOpinion(db, matchId) {
       totals_line_calibration_delta: t.totals_line_calibration_delta ?? 0,
       tournament_goals_delta: t.tournament_goals_delta ?? 0,
       tournament_goals_adjusted: !!t.tournament_goals_adjusted,
+      rest_delta: t.rest_delta ?? 0,
+      rest_adjusted: !!t.rest_adjusted,
       totals_market_movement_delta: t.totals_market_movement_delta ?? 0,
       totals_market_movement_adjusted: !!t.totals_market_movement_adjusted,
     })),
@@ -2046,6 +2191,7 @@ export function generateCodexOpinion(db, matchId) {
     regime_calibration: regimeCalibration.applied,
     tournament_goals: goalsContext,
     team_form: { ...teamForm, adjustment: teamFormAdjustment },
+    rest_context: { ...restContext, adjustment: restAdjustment },
     live_context: live,
   };
 
