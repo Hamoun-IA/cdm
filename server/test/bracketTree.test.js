@@ -1,0 +1,75 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { buildTree, TREE } from '../../web/src/views/bracketTree.js';
+
+const m = (num, stage, home = null, away = null) => ({
+  id: num,
+  fifa_match_number: num,
+  stage,
+  home_placeholder: home,
+  away_placeholder: away,
+  status: 'TIMED',
+});
+
+function worldCupKnockoutFixture() {
+  return {
+    R32: Array.from({ length: 16 }, (_, index) => m(73 + index, 'R32')),
+    R16: [
+      m(89, 'R16', 'W74', 'W77'),
+      m(90, 'R16', 'W73', 'W75'),
+      m(91, 'R16', 'W76', 'W78'),
+      m(92, 'R16', 'W79', 'W80'),
+      m(93, 'R16', 'W83', 'W84'),
+      m(94, 'R16', 'W81', 'W82'),
+      m(95, 'R16', 'W86', 'W88'),
+      m(96, 'R16', 'W85', 'W87'),
+    ],
+    QF: [
+      m(97, 'QF', 'W89', 'W90'),
+      m(98, 'QF', 'W93', 'W94'),
+      m(99, 'QF', 'W91', 'W92'),
+      m(100, 'QF', 'W95', 'W96'),
+    ],
+    SF: [
+      m(101, 'SF', 'W97', 'W98'),
+      m(102, 'SF', 'W99', 'W100'),
+    ],
+    FINAL: [
+      m(104, 'FINAL', 'W101', 'W102'),
+    ],
+  };
+}
+
+function matchNode(tree, matchNo) {
+  return tree.nodes.find((node) => Number(node.match.fifa_match_number) === matchNo);
+}
+
+function centerY(node) {
+  return node.y + TREE.nodeH / 2;
+}
+
+function orderedMatchNosInColumn(tree, x) {
+  return tree.nodes
+    .filter((node) => node.x === x)
+    .sort((a, b) => a.y - b.y)
+    .map((node) => Number(node.match.fifa_match_number));
+}
+
+test('buildTree : aligne les 8es sur leurs vrais vainqueurs entrants', () => {
+  const tree = buildTree(worldCupKnockoutFixture(), m(103, 'THIRD', 'L101', 'L102'));
+  const leftR32 = orderedMatchNosInColumn(tree, 0);
+  const rightR32 = orderedMatchNosInColumn(tree, (TREE.nodeW + TREE.gapX) * 8);
+
+  assert.deepEqual(leftR32, [74, 77, 73, 75, 83, 84, 81, 82]);
+  assert.deepEqual(rightR32, [76, 78, 79, 80, 86, 88, 85, 87]);
+
+  const m74 = matchNode(tree, 74);
+  const m77 = matchNode(tree, 77);
+  const m89 = matchNode(tree, 89);
+  const m73 = matchNode(tree, 73);
+  const m75 = matchNode(tree, 75);
+  const m90 = matchNode(tree, 90);
+
+  assert.equal(centerY(m89), (centerY(m74) + centerY(m77)) / 2);
+  assert.equal(centerY(m90), (centerY(m73) + centerY(m75)) / 2);
+});
