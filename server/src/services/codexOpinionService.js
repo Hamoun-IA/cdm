@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v45';
+const MODEL_VERSION = 'codex-book-v46';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -1513,6 +1513,8 @@ function groupOpeningDrawAdjustmentPlan(match, probs, hasMarket, live) {
     applied: false,
     stage: match?.stage || null,
     matchday: match?.matchday ?? null,
+    favorite: null,
+    favorite_prob: null,
     draw_prob: probs?.draw == null ? null : round(probs.draw),
     target_draw: null,
     max_move: null,
@@ -1522,10 +1524,15 @@ function groupOpeningDrawAdjustmentPlan(match, probs, hasMarket, live) {
   };
   if (!openingGroup || live?.active || !validH2h(probs)) return base;
 
+  const favorite = H2H_OUTCOMES.reduce((acc, o) => probs[o] > probs[acc] ? o : acc, 'home');
+  const favoriteProb = Number(probs[favorite]);
   const drawProb = Number(probs.draw);
-  const targetDraw = 0.31;
-  const factor = 0.8;
-  const maxMove = hasMarket ? 0.018 : 0.014;
+  const strongSideFavorite = favorite !== 'draw' && favoriteProb >= 0.60;
+  const targetDraw = strongSideFavorite ? 0.36 : 0.31;
+  const factor = strongSideFavorite ? 0.65 : 0.8;
+  const maxMove = strongSideFavorite
+    ? (hasMarket ? 0.026 : 0.02)
+    : (hasMarket ? 0.018 : 0.014);
   const drawDelta = clamp(Math.max(0, targetDraw - drawProb) * factor, 0, maxMove);
   const applied = drawDelta >= 0.003;
   const sideTotal = Math.max(0.001, Number(probs.home || 0) + Number(probs.away || 0));
@@ -1538,6 +1545,8 @@ function groupOpeningDrawAdjustmentPlan(match, probs, hasMarket, live) {
 
   return {
     ...base,
+    favorite,
+    favorite_prob: round(favoriteProb),
     draw_prob: round(drawProb),
     target_draw: round(targetDraw),
     max_move: round(maxMove),

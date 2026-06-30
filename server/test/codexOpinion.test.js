@@ -81,7 +81,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v45');
+  assert.equal(opinion.model_version, 'codex-book-v46');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -106,6 +106,33 @@ test('generateCodexOpinion : rehausse prudemment le nul des premiers matchs de g
   assert.ok(adjustment.draw_delta > 0);
   assert.ok(opinion.probabilities.draw > adjustment.draw_prob);
   assert.match(opinion.summary, /Premier match de groupe/);
+});
+
+test('generateCodexOpinion : rehausse davantage le nul J1 quand un favori fort ouvre le tournoi', () => {
+  const db = freshDb();
+  for (const [bookmaker, home, draw, away] of [
+    ['book-a', 1.50, 4.40, 8.50],
+    ['book-b', 1.54, 4.30, 8.20],
+  ]) {
+    for (const [outcome, price] of [['home', home], ['draw', draw], ['away', away]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const adjustment = opinion.diagnostics.group_opening_draw_adjustment;
+
+  assert.equal(adjustment.available, true);
+  assert.equal(adjustment.applied, true);
+  assert.equal(adjustment.favorite, 'home');
+  assert.ok(adjustment.favorite_prob >= 0.60);
+  assert.equal(adjustment.target_draw, 0.36);
+  assert.equal(adjustment.max_move, 0.026);
+  assert.ok(adjustment.draw_delta >= 0.015);
+  assert.ok(opinion.probabilities.draw > adjustment.draw_prob);
 });
 
 test('generateCodexOpinion : ne rehausse pas le nul groupe apres la premiere journee', () => {
