@@ -63,6 +63,8 @@ test('buildTree : aligne les 8es sur leurs vrais vainqueurs entrants', () => {
 
   assert.deepEqual(leftR32, [74, 77, 73, 75, 83, 84, 81, 82]);
   assert.deepEqual(rightR32, [76, 78, 79, 80, 86, 88, 85, 87]);
+  assert.notDeepEqual(leftR32.slice(0, 2), [73, 74]);
+  assert.equal(tree.labels.find((label) => label.key === 'l-r32')?.count, '8 matchs');
 
   const m74 = matchNode(tree, 74);
   const m77 = matchNode(tree, 77);
@@ -73,4 +75,7 @@ test('buildTree : aligne les 8es sur leurs vrais vainqueurs entrants', () => {
 
   assert.equal(centerY(m89), (centerY(m74) + centerY(m77)) / 2);
   assert.equal(centerY(m90), (centerY(m73) + centerY(m75)) / 2);
+  assert.ok(tree.lines.some((line) => line.key.startsWith('74-89-')));
+  assert.ok(tree.lines.some((line) => line.key.startsWith('77-89-')));
+  assert.equal(tree.lines.some((line) => line.key.startsWith('73-89-')), false);
 });
