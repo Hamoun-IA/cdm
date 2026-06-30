@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v65';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v66';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -2451,6 +2451,78 @@ function applyCentralDrawBandAdjustment(probs, plan) {
   return normalize(adjusted);
 }
 
+function strongFavoriteDrawTailPlan(match, probs, teamForm, live) {
+  const base = {
+    available: !live?.active,
+    applied: false,
+    stage: match?.stage || null,
+    matchday: match?.matchday ?? null,
+    context: null,
+    favorite: null,
+    favorite_prob: null,
+    draw_prob: probs?.draw == null ? null : round(probs.draw),
+    min_favorite_prob: 0.68,
+    max_draw_prob: 0.24,
+    target_draw: 0.27,
+    max_move: 0.05,
+    draw_delta: 0,
+    deltas: { home: 0, draw: 0, away: 0 },
+  };
+  if (live?.active || !validH2h(probs)) return base;
+
+  const favorite = probs.home >= probs.away ? 'home' : 'away';
+  const opponent = favorite === 'home' ? 'away' : 'home';
+  const favoriteProb = Number(probs[favorite] || 0);
+  const drawProb = Number(probs.draw || 0);
+  const favoriteDelta = Number(teamForm?.[favorite]?.points_vs_expected_per_match);
+  const opponentDelta = Number(teamForm?.[opponent]?.points_vs_expected_per_match);
+  const contrarianFavorite = teamForm?.available
+    && Number.isFinite(favoriteDelta)
+    && Number.isFinite(opponentDelta)
+    && favoriteDelta + 0.25 < opponentDelta;
+  const openingGroup = match?.stage === 'GROUP' && Number(match?.matchday) === 1;
+  const contrarianGroupJ2 = match?.stage === 'GROUP' && Number(match?.matchday) === 2 && contrarianFavorite;
+  const context = openingGroup ? 'group_opening_extreme_favorite' : (contrarianGroupJ2 ? 'group_j2_contrarian_extreme_favorite' : null);
+
+  if (!context || favoriteProb < base.min_favorite_prob || drawProb > base.max_draw_prob) {
+    return {
+      ...base,
+      context,
+      favorite,
+      favorite_prob: round(favoriteProb),
+      draw_prob: round(drawProb),
+    };
+  }
+
+  const drawDelta = clamp(Math.min(base.target_draw - drawProb, favoriteProb - 0.45), 0, base.max_move);
+  const applied = drawDelta >= 0.003;
+  const deltas = { home: 0, draw: 0, away: 0 };
+  if (applied) {
+    deltas[favorite] = round(-drawDelta);
+    deltas.draw = round(drawDelta);
+  }
+
+  return {
+    ...base,
+    applied,
+    context,
+    favorite,
+    favorite_prob: round(favoriteProb),
+    draw_prob: round(drawProb),
+    draw_delta: applied ? round(drawDelta) : 0,
+    deltas,
+  };
+}
+
+function applyStrongFavoriteDrawTail(probs, plan) {
+  if (!plan?.available || !plan.applied) return probs;
+  const adjusted = {};
+  for (const outcome of H2H_OUTCOMES) {
+    adjusted[outcome] = clamp(probs[outcome] + Number(plan.deltas?.[outcome] || 0), 0.025, 0.94);
+  }
+  return normalize(adjusted);
+}
+
 function applyRestTotalsAdjustment(lines, restPlan) {
   const delta = Number(restPlan?.totals_delta || 0);
   if (!restPlan?.available || Math.abs(delta) < 0.0001) {
@@ -3562,9 +3634,10 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration, teamF
       && matchday2CompressedHomeDraw
     ) {
       const homeProbability = Number(ranked[0].probability || 0);
+      const drawProbability = Number(matchday2CompressedHomeDraw.probability || 0);
       const totalOverProbability = Number(standardTotal25?.probs?.over ?? 0);
       const gap = ranked[0].choice_score - matchday2CompressedHomeDraw.choice_score;
-      if (homeProbability >= 0.49 && homeProbability <= 0.56 && totalOverProbability <= 0.54 && gap >= 0 && gap <= 0.27) {
+      if (homeProbability >= 0.49 && homeProbability <= 0.56 && drawProbability >= 0.34 && totalOverProbability <= 0.54 && gap >= 0 && gap <= 0.27) {
         const boost = round(gap + 0.0002);
         matchday2CompressedHomeDraw.choice_score = round(matchday2CompressedHomeDraw.choice_score + boost);
         matchday2CompressedHomeDraw.choice_adjustments.matchday2_compressed_home_draw_guard = boost;
@@ -3590,7 +3663,7 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration, teamF
       && matchday2ZeroPointsUnder
     ) {
       const gap = ranked[0].choice_score - matchday2ZeroPointsUnder.choice_score;
-      if (gap >= 0 && gap <= 0.125) {
+      if (gap >= 0 && gap <= 0.13) {
         const boost = round(gap + 0.0002);
         matchday2ZeroPointsUnder.choice_score = round(matchday2ZeroPointsUnder.choice_score + boost);
         matchday2ZeroPointsUnder.choice_adjustments.matchday2_zero_points_under_guard = boost;
@@ -3884,7 +3957,7 @@ function confidenceDetails({ match, market, totals, intel, scorecard, previous, 
       Number(sideForm?.played || 0) >= 1 &&
       Number(opponentForm?.played || 0) >= 1 &&
       Number(sideForm?.points) === Number(opponentForm?.points) &&
-      forcedProbability >= 0.68 &&
+      forcedProbability >= 0.63 &&
       Number.isFinite(sideDelta) &&
       Number.isFinite(opponentDelta) &&
       sideDelta <= -0.9 &&
@@ -4189,7 +4262,13 @@ function centralDrawBandSummary(adjustment) {
   return ` Memoire nul central : le reliquat ${side} est transfere vers le nul (+${(Number(adjustment.transfer_delta || 0) * 100).toFixed(1)} pt).`;
 }
 
-function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, knockoutDrawMemoryAdjustment, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression, homeFavoriteOpenAwayTransfer, centralDrawBandAdjustment) {
+function strongFavoriteDrawTailSummary(match, adjustment) {
+  if (!adjustment?.available || !adjustment.applied) return '';
+  const favorite = adjustment.favorite ? teamName(match, adjustment.favorite) : teamName(match, 'home');
+  return ` Queue de nul favori extreme : ${favorite} reste nettement devant, mais le nul est releve (+${(Number(adjustment.draw_delta || 0) * 100).toFixed(1)} pt).`;
+}
+
+function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, knockoutDrawMemoryAdjustment, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression, homeFavoriteOpenAwayTransfer, centralDrawBandAdjustment, strongFavoriteDrawTail) {
   const ordered = H2H_OUTCOMES.slice().sort((a, b) => h2h[b] - h2h[a]);
   const fav = ordered[0];
   const favName = teamName(match, fav);
@@ -4225,10 +4304,11 @@ function summarize(match, h2h, totals, forced, conf, sources, calibration, teamF
   const residualAwayCompression = homeFavoriteResidualAwayCompressionSummary(homeFavoriteResidualAwayCompression);
   const openHomeAwayTransfer = homeFavoriteOpenAwayTransferSummary(homeFavoriteOpenAwayTransfer);
   const centralDrawBand = centralDrawBandSummary(centralDrawBandAdjustment);
+  const strongDrawTail = strongFavoriteDrawTailSummary(match, strongFavoriteDrawTail);
   const learned = calibrationSummary(calibration, regimeCalibration);
   return {
     headline: `${favName} ${h2h[fav] >= 0.5 ? 'net favori Codex' : 'léger avantage Codex'}`,
-    summary: `${lead}${ou}${liveText}${movement}${totalsMove} ${data}${form}${rest}${knockoutRegulation}${homeDrawGuard}${awayDrawCompression}${koDrawFloor}${koDrawMemory}${strongDrawFloor}${strongAwayFollowThrough}${groupOpeningDraw}${forcedOuDraw}${openDrawGuard}${drawFavorite}${homeAwayCompression}${residualAwayCompression}${openHomeAwayTransfer}${centralDrawBand}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
+    summary: `${lead}${ou}${liveText}${movement}${totalsMove} ${data}${form}${rest}${knockoutRegulation}${homeDrawGuard}${awayDrawCompression}${koDrawFloor}${koDrawMemory}${strongDrawFloor}${strongAwayFollowThrough}${groupOpeningDraw}${forcedOuDraw}${openDrawGuard}${drawFavorite}${homeAwayCompression}${residualAwayCompression}${openHomeAwayTransfer}${centralDrawBand}${strongDrawTail}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
   };
 }
 
@@ -4740,6 +4820,8 @@ export function generateCodexOpinion(db, matchId) {
   h2h = applyHomeFavoriteOpenAwayTransfer(h2h, homeFavoriteOpenAwayTransfer);
   const centralDrawBandAdjustment = centralDrawBandAdjustmentPlan(h2h, calibration, !!market, live);
   h2h = applyCentralDrawBandAdjustment(h2h, centralDrawBandAdjustment);
+  const strongFavoriteDrawTail = strongFavoriteDrawTailPlan(match, h2h, teamForm, live);
+  h2h = applyStrongFavoriteDrawTail(h2h, strongFavoriteDrawTail);
   fairOdds = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, impliedOdds(h2h[o])]));
   const forced = bestForcedPick(match, h2h, fairOdds, market, totals, calibration, teamForm);
   const confidenceContext = confidenceDetails({ match, market, totals, intel, scorecard, previous, calibration, teamForm, live, marketMovement, probabilities: h2h, forced });
@@ -4843,6 +4925,7 @@ export function generateCodexOpinion(db, matchId) {
     home_favorite_residual_away_compression: homeFavoriteResidualAwayCompression,
     home_favorite_open_away_transfer: homeFavoriteOpenAwayTransfer,
     central_draw_band_adjustment: centralDrawBandAdjustment,
+    strong_favorite_draw_tail: strongFavoriteDrawTail,
     market_movement: marketMovement,
     h2h_market_movement_adjustment: marketMovementAdjustment,
     totals_market_movement: totalsMovement,
@@ -4890,10 +4973,10 @@ export function generateCodexOpinion(db, matchId) {
     live_score_changed: liveScoreChanged,
   };
   const changes = changeSummary(previous, sources);
-  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, knockoutDrawMemoryAdjustment, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression, homeFavoriteOpenAwayTransfer, centralDrawBandAdjustment);
+  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, knockoutDrawMemoryAdjustment, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression, homeFavoriteOpenAwayTransfer, centralDrawBandAdjustment, strongFavoriteDrawTail);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_line_calibrated`,
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_line_calibrated`,
     h2h_books: market?.books || 0,
     prior: prior.context,
     market_movement: marketMovement,
@@ -4951,6 +5034,7 @@ export function generateCodexOpinion(db, matchId) {
     home_favorite_residual_away_compression: homeFavoriteResidualAwayCompression,
     home_favorite_open_away_transfer: homeFavoriteOpenAwayTransfer,
     central_draw_band_adjustment: centralDrawBandAdjustment,
+    strong_favorite_draw_tail: strongFavoriteDrawTail,
     live_context: live,
   };
 

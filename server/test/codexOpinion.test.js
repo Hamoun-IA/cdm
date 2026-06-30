@@ -109,7 +109,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -391,6 +391,27 @@ test('generateCodexOpinion : bascule un favori exterieur J1 moyen vers Under 2.5
   assert.ok(forced.choice_adjustments.opening_away_favorite_total_under_guard > 0);
 });
 
+test('generateCodexOpinion : releve la queue de nul dun favori extreme en ouverture', () => {
+  const db = freshDb();
+  insertH2hOdds(db, [['home', 30.00], ['draw', 5.50], ['away', 1.28]]);
+  insertTotalOdds(db, 2.5, 1.77, 2.40);
+
+  const opinion = generateCodexOpinion(db, 1);
+  const forced = opinion.diagnostics.forced_choice;
+  const adjustment = opinion.diagnostics.strong_favorite_draw_tail;
+
+  assert.equal(forced.market, '1X2');
+  assert.equal(forced.selection, 'away');
+  assert.equal(adjustment.available, true);
+  assert.equal(adjustment.applied, true);
+  assert.equal(adjustment.context, 'group_opening_extreme_favorite');
+  assert.equal(adjustment.favorite, 'away');
+  assert.ok(adjustment.favorite_prob >= 0.68);
+  assert.ok(adjustment.draw_delta > 0);
+  assert.ok(opinion.probabilities.draw > adjustment.draw_prob);
+  assert.match(opinion.summary, /Queue de nul favori extreme/);
+});
+
 test('generateCodexOpinion : force le nul J2 sur favori domicile compresse a points egaux', () => {
   const db = freshDb();
   db.prepare("UPDATE matches SET matchday = 2, kickoff_utc = '2026-06-15T19:00:00Z' WHERE id = 1").run();
@@ -414,8 +435,8 @@ test('generateCodexOpinion : force le nul J2 sur favori domicile compresse a poi
     homeScore: 0,
     awayScore: 0,
   });
-  insertH2hOdds(db, [['home', 1.82], ['draw', 3.55], ['away', 5.10]], { takenAt: '2026-06-15T08:00:00Z' });
-  insertTotalOdds(db, 2.5, 2.20, 1.72, { takenAt: '2026-06-15T08:00:00Z' });
+  insertH2hOdds(db, [['home', 2.00], ['draw', 2.80], ['away', 7.00]], { takenAt: '2026-06-15T08:00:00Z' });
+  insertTotalOdds(db, 2.5, 2.00, 1.90, { takenAt: '2026-06-15T08:00:00Z' });
 
   const opinion = generateCodexOpinion(db, 1);
   const forced = opinion.diagnostics.forced_choice;
