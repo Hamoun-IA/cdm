@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v23';
+const MODEL_VERSION = 'codex-book-v24';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -1248,6 +1248,7 @@ function strongFavoriteDrawFloorGuardPlan(match, probs, hasMarket, live) {
     draw_prob: probs?.draw == null ? null : round(probs.draw),
     target_draw: null,
     max_move: null,
+    home_slot_draw_memory: false,
     draw_delta: 0,
     deltas: { home: 0, draw: 0, away: 0 },
   };
@@ -1255,26 +1256,32 @@ function strongFavoriteDrawFloorGuardPlan(match, probs, hasMarket, live) {
   const favorite = H2H_OUTCOMES.reduce((acc, o) => probs[o] > probs[acc] ? o : acc, 'home');
   const favoriteProb = Number(probs[favorite]);
   const drawProb = Number(probs.draw);
+  const homeSlotDrawMemory = favorite === 'home' && favoriteProb >= 0.70;
   if (favorite === 'draw' || favoriteProb < 0.70 || drawProb >= 0.24) {
     return {
       ...base,
       favorite,
       favorite_prob: round(favoriteProb),
-      target_draw: 0.24,
+      target_draw: homeSlotDrawMemory ? 0.28 : 0.24,
+      home_slot_draw_memory: homeSlotDrawMemory,
     };
   }
 
-  const targetDraw = 0.24;
+  const targetDraw = homeSlotDrawMemory ? 0.28 : 0.24;
   const shortfall = Math.max(0, targetDraw - drawProb);
-  const maxMove = hasMarket ? 0.024 : 0.016;
-  const drawDelta = clamp(shortfall * 0.72, 0, maxMove);
+  const maxMove = homeSlotDrawMemory
+    ? (hasMarket ? 0.048 : 0.032)
+    : (hasMarket ? 0.024 : 0.016);
+  const factor = homeSlotDrawMemory ? 0.60 : 0.72;
+  const drawDelta = clamp(shortfall * factor, 0, maxMove);
   const applied = drawDelta >= 0.003;
   const other = favorite === 'home' ? 'away' : 'home';
+  const favoriteShare = homeSlotDrawMemory ? 0.88 : 0.84;
   const deltas = { home: 0, draw: 0, away: 0 };
   if (applied) {
     deltas.draw = round(drawDelta);
-    deltas[favorite] = round(-drawDelta * 0.84);
-    deltas[other] = round(-drawDelta * 0.16);
+    deltas[favorite] = round(-drawDelta * favoriteShare);
+    deltas[other] = round(-drawDelta * (1 - favoriteShare));
   }
 
   return {
@@ -1284,6 +1291,8 @@ function strongFavoriteDrawFloorGuardPlan(match, probs, hasMarket, live) {
     draw_prob: round(drawProb),
     target_draw: round(targetDraw),
     max_move: round(maxMove),
+    factor: round(factor),
+    home_slot_draw_memory: homeSlotDrawMemory,
     draw_delta: applied ? round(drawDelta) : 0,
     deltas,
     applied,

@@ -81,7 +81,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v23');
+  assert.equal(opinion.model_version, 'codex-book-v24');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -388,10 +388,39 @@ test('generateCodexOpinion : rehausse le nul des favoris forts meme en groupe', 
   assert.equal(guard.available, true);
   assert.equal(guard.applied, true);
   assert.equal(guard.favorite, 'home');
-  assert.ok(guard.draw_delta > 0.02);
-  assert.ok(opinion.probabilities.draw >= 0.18);
-  assert.ok(opinion.probabilities.home < 0.76);
+  assert.equal(guard.home_slot_draw_memory, true);
+  assert.equal(guard.target_draw, 0.28);
+  assert.ok(guard.draw_delta > 0.04);
+  assert.ok(opinion.probabilities.draw >= 0.20);
+  assert.ok(opinion.probabilities.home < 0.74);
   assert.match(opinion.summary, /Plancher favori fort/);
+});
+
+test('generateCodexOpinion : ne surcorrige pas les favoris exterieurs forts', () => {
+  const db = freshDb();
+  for (const [bookmaker, home, draw, away] of [
+    ['book-a', 14.00, 6.00, 1.24],
+    ['book-b', 13.00, 5.80, 1.26],
+  ]) {
+    for (const [outcome, price] of [['home', home], ['draw', draw], ['away', away]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const guard = opinion.diagnostics.strong_favorite_draw_floor_guard;
+
+  assert.equal(guard.available, true);
+  assert.equal(guard.applied, true);
+  assert.equal(guard.favorite, 'away');
+  assert.equal(guard.home_slot_draw_memory, false);
+  assert.equal(guard.target_draw, 0.24);
+  assert.equal(guard.max_move, 0.024);
+  assert.ok(guard.draw_delta <= 0.024);
+  assert.ok(opinion.probabilities.away > 0.74);
 });
 
 test('generateCodexOpinion : en KO sans cotes, integre l ecart de recuperation', () => {
