@@ -81,7 +81,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v42');
+  assert.equal(opinion.model_version, 'codex-book-v43');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -1012,7 +1012,7 @@ test('generateCodexOpinion : renforce le nul quand il est deja favori et confirm
   assert.equal(guard.source_key, 'favorite:draw');
   assert.ok(guard.effective_n >= 5);
   assert.ok(guard.draw_bias >= 0.12);
-  assert.equal(guard.target_draw, 0.56);
+  assert.equal(guard.target_draw, 0.62);
   assert.ok(guard.draw_delta > 0);
   assert.ok(guard.deltas.draw > 0);
   assert.ok(guard.deltas.home < 0);
