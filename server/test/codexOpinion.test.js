@@ -81,13 +81,13 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v34');
+  assert.equal(opinion.model_version, 'codex-book-v35');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_group_opening_forced_ou_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_group_opening_forced_ou_open_match_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -917,8 +917,58 @@ test('generateCodexOpinion : applique le régime match ouvert avant un favori tr
 
   assert.equal(opinion.diagnostics.regime_calibration.key, 'confidence:open');
   assert.ok(opinion.diagnostics.regime_calibration.deltas.draw > 0);
-  assert.ok(opinion.diagnostics.regime_calibration.max_move <= 0.018);
+  assert.equal(opinion.diagnostics.regime_calibration.max_move, 0.035);
+  assert.equal(opinion.diagnostics.regime_calibration.weight_scale, 1.55);
   assert.ok(opinion.probabilities.draw > 0.31);
+});
+
+test('generateCodexOpinion : renforce le nul des matchs ouverts quand le replay surestime l outsider', () => {
+  const db = freshDb();
+  db.prepare('UPDATE matches SET matchday = 2 WHERE id = 1').run();
+  for (const bookmaker of ['book-a', 'book-b', 'book-c']) {
+    for (const [outcome, price] of [['home', 2.35], ['draw', 3.35], ['away', 3.25]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+    for (const [side, price] of [['over', 1.95], ['under', 1.90]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, point, price, taken_at)
+        VALUES (1, @bookmaker, 'totals', @outcome, 2.5, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome: `${side}_2.5`, price });
+    }
+  }
+  for (let id = 2; id <= 11; id++) {
+    const drawResult = id <= 7;
+    insertFinishedMatch(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      homeScore: drawResult ? 1 : 2,
+      awayScore: drawResult ? 1 : 0,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-10T00:00:00Z',
+      modelVersion: 'codex-book-v34',
+      probabilities: { home: 0.36, draw: 0.34, away: 0.30 },
+      forcedMarket: '1X2',
+      forcedSelection: 'home',
+    });
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const guard = opinion.diagnostics.open_match_draw_guard;
+
+  assert.equal(guard.available, true);
+  assert.equal(guard.applied, true);
+  assert.equal(guard.source_key, 'confidence:open');
+  assert.ok(guard.favorite_prob < 0.5);
+  assert.ok(guard.draw_delta > 0);
+  assert.ok(guard.deltas.draw > 0);
+  assert.ok(guard.deltas.away < guard.deltas.home);
+  assert.ok(opinion.probabilities.draw > guard.draw_prob);
+  assert.match(opinion.summary, /Match ouvert/);
 });
 
 test('generateCodexOpinion : calibre les lignes Over Under par ligne standard', () => {
