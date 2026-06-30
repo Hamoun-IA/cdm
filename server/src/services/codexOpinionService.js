@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v15';
+const MODEL_VERSION = 'codex-book-v16';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -1710,6 +1710,13 @@ function marketDepthAdjustment(candidate) {
   return 0;
 }
 
+function syntheticLeanAdjustment(candidate) {
+  if (candidate.market === '1X2' || !candidate.synthetic) return 0;
+  const probability = Number(candidate.probability);
+  if (!Number.isFinite(probability) || probability >= 0.55) return 0;
+  return -round(clamp((0.55 - probability) * 0.75, 0, 0.035));
+}
+
 function forcedCandidateDiagnostic(candidate) {
   return {
     market: candidate.market,
@@ -1764,14 +1771,16 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
     const exactPickReliability = forcedExactPickReliabilityAdjustment(calibration, candidate.market, candidate.selection);
     const reliability = round(marketReliability + exactMarketReliability + exactPickReliability);
     const depth = marketDepthAdjustment(candidate);
+    const syntheticLean = syntheticLeanAdjustment(candidate);
     const edge = candidate.edge == null ? 0 : clamp(candidate.edge * 0.08, -0.012, 0.018);
-    candidate.choice_score = round(candidate.probability + reliability + depth + edge);
+    candidate.choice_score = round(candidate.probability + reliability + depth + syntheticLean + edge);
     candidate.choice_adjustments = {
       reliability,
       market_reliability: marketReliability,
       exact_market_reliability: exactMarketReliability,
       exact_pick_reliability: exactPickReliability,
       depth,
+      synthetic_lean: syntheticLean,
       edge,
     };
   }

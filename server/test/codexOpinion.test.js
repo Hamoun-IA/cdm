@@ -67,7 +67,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v15');
+  assert.equal(opinion.model_version, 'codex-book-v16');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -341,6 +341,59 @@ test('generateCodexOpinion : sans cotes, renforce la forme tournoi et pénalise 
   assert.equal(opinion.totals[0].synthetic, true);
   assert.equal(opinion.forced_pick_market, '1X2');
   assert.equal(opinion.forced_pick_selection, 'home');
+});
+
+test('generateCodexOpinion : ne laisse pas un O/U synthétique neutre battre le 1X2 appris', () => {
+  const db = freshDb();
+  db.prepare("INSERT INTO teams (id, fifa_code, name, group_code) VALUES (3,'AAA','Alpha','B'), (4,'BBB','Beta','B')").run();
+  for (let id = 2; id <= 9; id++) {
+    insertTeamResult(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      home: 3,
+      away: 4,
+      homeScore: 1,
+      awayScore: 0,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-10T00:00:00Z',
+      modelVersion: 'codex-book-v15',
+      probabilities: { home: 0.39, draw: 0.29, away: 0.32 },
+      totals: [],
+      forcedMarket: '1X2',
+      forcedSelection: 'home',
+    });
+  }
+  for (let id = 10; id <= 17; id++) {
+    insertTeamResult(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      home: 3,
+      away: 4,
+      homeScore: 1,
+      awayScore: 0,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-10T00:00:00Z',
+      modelVersion: 'codex-book-v15',
+      probabilities: { home: 0.39, draw: 0.29, away: 0.32 },
+      totals: [{ line: 2.5, probs: { over: 0.52, under: 0.48 }, fair_odds: { over: 1.92, under: 2.08 }, synthetic: true }],
+      forcedMarket: 'OU_2.5',
+      forcedSelection: 'over',
+    });
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const syntheticOver = opinion.diagnostics.forced_choice.alternatives.find((candidate) => (
+    candidate.synthetic && candidate.market === 'OU_2.5' && candidate.selection === 'over'
+  ));
+
+  assert.equal(opinion.totals[0].synthetic, true);
+  assert.equal(opinion.forced_pick_market, '1X2');
+  assert.equal(opinion.forced_pick_selection, 'home');
+  assert.ok(syntheticOver.choice_adjustments.synthetic_lean < -0.02);
 });
 
 test('generateCodexOpinion : le choix forcé suit le scénario le plus probable, pas une value cachée', () => {
