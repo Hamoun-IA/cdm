@@ -16,7 +16,7 @@ export const TREE = {
   headH: 42,
 };
 
-export const BRACKET_TOPOLOGY_VERSION = 'dependency-v15';
+export const BRACKET_TOPOLOGY_VERSION = 'dependency-v16';
 
 const OFFICIAL_R16_ENTRANTS = new Map([
   [89, [74, 77]],
