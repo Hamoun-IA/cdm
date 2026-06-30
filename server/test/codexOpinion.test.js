@@ -109,7 +109,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod40_shallowhome36_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod40_shallowhome36_over15draw28_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -825,12 +825,15 @@ test('generateCodexOpinion : echappe dun Under 2.5 J1 central vers Over 1.5', ()
 
   const opinion = generateCodexOpinion(db, 1);
   const forced = opinion.diagnostics.forced_choice;
+  const uncertainty = opinion.diagnostics.final_ou_h2h_uncertainty;
 
   assert.equal(forced.preliminary_market, 'OU_2.5');
   assert.equal(forced.preliminary_selection, 'under');
   assert.equal(forced.market, 'OU_1.5');
   assert.equal(forced.selection, 'over');
   assert.ok(forced.choice_adjustments.opening_total_under_escape_guard > 0);
+  assert.equal(uncertainty.top_outcome, 'draw');
+  assert.equal(uncertainty.target_top_probability, 0.28);
 });
 
 test('generateCodexOpinion : force le nul J1 dun favori domicile avec total bas', () => {
