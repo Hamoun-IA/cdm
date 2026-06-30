@@ -109,7 +109,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_final_ou_uncertainty_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_forced_scenario_alignment_final_ou_uncertainty_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -198,12 +198,15 @@ test('generateCodexOpinion : force le nul J1 sur favori domicile compresse et nu
 
   const opinion = generateCodexOpinion(db, 1);
   const forced = opinion.diagnostics.forced_choice;
+  const alignment = opinion.diagnostics.forced_scenario_alignment;
 
   assert.equal(forced.preliminary_market, '1X2');
   assert.equal(forced.market, '1X2');
   assert.equal(forced.selection, 'draw');
-  assert.ok(opinion.probabilities.home > opinion.probabilities.draw);
   assert.ok(forced.choice_adjustments.opening_home_draw_position_guard > 0);
+  assert.equal(alignment.applied, true);
+  assert.ok(alignment.guard_keys.includes('opening_home_draw_position_guard'));
+  assert.ok(opinion.probabilities.draw > opinion.probabilities.home);
 });
 
 test('generateCodexOpinion : calibre la confiance quand le choix force historique etait sous-cote', () => {
@@ -451,6 +454,7 @@ test('generateCodexOpinion : force le nul J2 sur favori domicile compresse a poi
 
   const opinion = generateCodexOpinion(db, 1);
   const forced = opinion.diagnostics.forced_choice;
+  const alignment = opinion.diagnostics.forced_scenario_alignment;
 
   assert.equal(opinion.diagnostics.team_form.home.points, opinion.diagnostics.team_form.away.points);
   assert.equal(opinion.diagnostics.team_form.home.points, 1);
@@ -459,6 +463,14 @@ test('generateCodexOpinion : force le nul J2 sur favori domicile compresse a poi
   assert.equal(forced.market, '1X2');
   assert.equal(forced.selection, 'draw');
   assert.ok(forced.choice_adjustments.matchday2_compressed_home_draw_guard > 0);
+  assert.equal(alignment.available, true);
+  assert.equal(alignment.applied, true);
+  assert.equal(alignment.final_market, '1X2');
+  assert.equal(alignment.final_selection, 'draw');
+  assert.ok(alignment.guard_keys.includes('matchday2_compressed_home_draw_guard'));
+  assert.ok(alignment.transfer_delta > 0);
+  assert.ok(opinion.probabilities.draw > opinion.probabilities.home);
+  assert.match(opinion.summary, /Choix 1X2 final/);
 });
 
 test('generateCodexOpinion : prefere Under 2.5 J2 quand deux equipes battues repartent sur un total bas', () => {
@@ -1353,13 +1365,16 @@ test('generateCodexOpinion : en KO avec marche, compresse un favori tres haut su
   }
 
   const opinion = generateCodexOpinion(db, 1);
+  const alignment = opinion.diagnostics.forced_scenario_alignment;
 
   assert.equal(opinion.diagnostics.knockout_regulation_adjustment.available, true);
   assert.equal(opinion.diagnostics.knockout_regulation_adjustment.applied, true);
   assert.ok(opinion.diagnostics.knockout_regulation_adjustment.deltas.draw > 0);
   assert.ok(opinion.diagnostics.knockout_regulation_adjustment.deltas.home < 0);
-  assert.ok(opinion.probabilities.home > opinion.probabilities.draw);
-  assert.ok(opinion.probabilities.draw > 0.18);
+  assert.equal(alignment.applied, true);
+  assert.ok(alignment.guard_keys.includes('knockout_side_draw_guard'));
+  assert.ok(opinion.probabilities.draw > opinion.probabilities.home);
+  assert.ok(opinion.probabilities.draw > 0.45);
   assert.ok(opinion.probabilities.home < 0.76);
   assert.match(opinion.summary, /Format KO 90 min/);
 });
@@ -1446,8 +1461,9 @@ test('generateCodexOpinion : force le nul KO quand il suit de pres un favori mod
 
   assert.equal(opinion.forced_pick_market, '1X2');
   assert.equal(opinion.forced_pick_selection, 'draw');
-  assert.ok(opinion.probabilities.home >= 0.54);
-  assert.ok(opinion.probabilities.draw >= 0.35);
+  assert.equal(opinion.diagnostics.forced_scenario_alignment.applied, true);
+  assert.ok(opinion.probabilities.draw > opinion.probabilities.home);
+  assert.ok(opinion.probabilities.draw >= 0.45);
   assert.ok(drawCandidate.choice_adjustments.knockout_side_draw_guard > 0);
 });
 
