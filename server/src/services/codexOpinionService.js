@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v58';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v59';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -94,7 +94,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v57' || version === 'codex-book-v56' || version === 'codex-book-v55' || version === 'codex-book-v54' || version === 'codex-book-v53' || version === 'codex-book-v52' || version === 'codex-book-v51' || version === 'codex-book-v50' || version === 'codex-book-v49' || version === 'codex-book-v48' || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v58' || version === 'codex-book-v57' || version === 'codex-book-v56' || version === 'codex-book-v55' || version === 'codex-book-v54' || version === 'codex-book-v53' || version === 'codex-book-v52' || version === 'codex-book-v51' || version === 'codex-book-v50' || version === 'codex-book-v49' || version === 'codex-book-v48' || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -325,6 +325,29 @@ function finalizedForcedBuckets(buckets) {
   ]));
 }
 
+function hasTournamentChoiceGuard(diagnostics) {
+  const adjustments = diagnostics?.forced_choice?.choice_adjustments || {};
+  return [
+    'opening_away_favorite_total_under_guard',
+    'matchday2_compressed_home_draw_guard',
+    'matchday3_qualified_away_over_guard',
+  ].some((key) => Number(adjustments[key] || 0) > 0);
+}
+
+function forcedCalibrationPick(row, diagnostics) {
+  const forced = diagnostics?.forced_choice || {};
+  if (hasTournamentChoiceGuard(diagnostics) && forced.preliminary_market && forced.preliminary_selection) {
+    return {
+      market: forced.preliminary_market,
+      selection: forced.preliminary_selection,
+    };
+  }
+  return {
+    market: row.forced_pick_market,
+    selection: row.forced_pick_selection,
+  };
+}
+
 function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
   const rows = latestPrematchCodexOpinions(db, excludedMatchId, cutoffUtc);
   const h2hPred = { home: 0, draw: 0, away: 0 };
@@ -355,6 +378,7 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
 
   rows.forEach((row, index) => {
     const rowWeight = historicalOpinionWeight(row, index, rows.length);
+    const diagnostics = safeJson(row.diagnostics_json, null);
     const actual = actualH2hOutcome(row);
     const probs = safeJson(row.probabilities_json, null);
     if (actual && validH2h(probs)) {
@@ -378,7 +402,6 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
       for (const key of drawBandRegimeKeys(probs)) {
         addRegimeSample(regimeBuckets, key, probs, actual, rowWeight);
       }
-      const diagnostics = safeJson(row.diagnostics_json, null);
       const movementKeys = new Set(h2hMarketMovementRegimeKeys(diagnostics?.market_movement));
       for (const key of h2hMarketMovementRegimeKeys(h2hMarketMovement(prematchOddsRows(db, row.match_id, row.kickoff_utc)))) {
         movementKeys.add(key);
@@ -389,24 +412,25 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
     }
 
     let forcedVerdict = null;
-    if (row.forced_pick_market === '1X2' && H2H_OUTCOMES.includes(row.forced_pick_selection)) {
-      forcedVerdict = row.forced_pick_selection === actual ? 'hit' : 'miss';
+    const calibrationPick = forcedCalibrationPick(row, diagnostics);
+    if (calibrationPick.market === '1X2' && H2H_OUTCOMES.includes(calibrationPick.selection)) {
+      forcedVerdict = calibrationPick.selection === actual ? 'hit' : 'miss';
     } else {
-      const m = String(row.forced_pick_market || '').match(/^OU_(\d+(?:\.\d+)?)$/);
+      const m = String(calibrationPick.market || '').match(/^OU_(\d+(?:\.\d+)?)$/);
       const goals = actualGoals(row);
       if (m && Number.isFinite(goals)) {
         const line = Number(m[1]);
         const forcedActual = goals > line ? 'over' : goals < line ? 'under' : null;
-        if (forcedActual) forcedVerdict = row.forced_pick_selection === forcedActual ? 'hit' : 'miss';
+        if (forcedActual) forcedVerdict = calibrationPick.selection === forcedActual ? 'hit' : 'miss';
       }
     }
-    if (forcedVerdict && isStandardForcedMarket(row.forced_pick_market)) {
-      const bucketKey = forcedMarketBucket(row.forced_pick_market);
+    if (forcedVerdict && isStandardForcedMarket(calibrationPick.market)) {
+      const bucketKey = forcedMarketBucket(calibrationPick.market);
       forcedN += 1;
       forcedEffectiveN += rowWeight;
       addForcedSample(forcedBuckets, bucketKey, forcedVerdict, rowWeight);
-      addForcedSample(forcedExactMarketBuckets, forcedExactMarket(row.forced_pick_market), forcedVerdict, rowWeight);
-      addForcedSample(forcedExactPickBuckets, forcedExactPick(row.forced_pick_market, row.forced_pick_selection), forcedVerdict, rowWeight);
+      addForcedSample(forcedExactMarketBuckets, forcedExactMarket(calibrationPick.market), forcedVerdict, rowWeight);
+      addForcedSample(forcedExactPickBuckets, forcedExactPick(calibrationPick.market, calibrationPick.selection), forcedVerdict, rowWeight);
       if (forcedVerdict === 'hit') {
         forcedHits += 1;
         forcedHitWeight += rowWeight;
@@ -3156,7 +3180,7 @@ function forcedCandidateDiagnostic(candidate) {
   };
 }
 
-function bestForcedPick(match, h2h, fairOdds, market, totals, calibration, teamForm = null) {
+function bestForcedPick(match, h2h, fairOdds, market, totals, calibration, teamForm = null, options = {}) {
   const candidates = H2H_OUTCOMES.map((o) => {
     const price = market?.best?.[o]?.price || null;
     return {
@@ -3214,6 +3238,9 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration, teamF
       knockout_side_draw_guard: 0,
       opening_home_draw_position_guard: 0,
       matchday2_equal_points_home_draw_guard: 0,
+      opening_away_favorite_total_under_guard: 0,
+      matchday2_compressed_home_draw_guard: 0,
+      matchday3_qualified_away_over_guard: 0,
       synthetic_lean: syntheticLean,
       ou_cross_market_friction: crossMarketFriction,
       edge,
@@ -3227,6 +3254,8 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration, teamF
     return (b.edge ?? -Infinity) - (a.edge ?? -Infinity);
   });
   let ranked = sortCandidates();
+  const applyTournamentChoiceGuards = options.tournamentChoiceGuards !== false;
+  const standardTotal25 = totals.find((line) => Number(line.line) === 2.5 && !line.synthetic);
   const lowDepthOver15 = lowDepthOver15Caution(ranked[0], totals);
   const topH2h = ranked.find((candidate) => candidate.market === '1X2');
   const h2hGap = topH2h ? ranked[0].choice_score - topH2h.choice_score : null;
@@ -3316,8 +3345,82 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration, teamF
       ranked = sortCandidates();
     }
   }
+  if (applyTournamentChoiceGuards) {
+    const openingAwayFavoriteUnder = ranked.find((candidate) => (
+      candidate.market === 'OU_2.5'
+      && candidate.selection === 'under'
+      && !candidate.synthetic
+      && Number(candidate.probability || 0) >= 0.53
+    ));
+    if (
+      match?.stage === 'GROUP'
+      && Number(match?.matchday) === 1
+      && ranked[0]?.market === '1X2'
+      && ranked[0].selection === 'away'
+      && openingAwayFavoriteUnder
+    ) {
+      const awayProbability = Number(ranked[0].probability || 0);
+      const totalOverProbability = Number(standardTotal25?.probs?.over);
+      const gap = ranked[0].choice_score - openingAwayFavoriteUnder.choice_score;
+      if (awayProbability >= 0.5 && awayProbability <= 0.65 && totalOverProbability <= 0.47 && gap >= 0 && gap <= 0.14) {
+        const boost = round(gap + 0.0002);
+        openingAwayFavoriteUnder.choice_score = round(openingAwayFavoriteUnder.choice_score + boost);
+        openingAwayFavoriteUnder.choice_adjustments.opening_away_favorite_total_under_guard = boost;
+        ranked = sortCandidates();
+      }
+    }
+    const matchday2CompressedHomeDraw = ranked.find((candidate) => (
+      candidate.market === '1X2'
+      && candidate.selection === 'draw'
+      && Number(candidate.probability || 0) >= 0.27
+    ));
+    if (
+      match?.stage === 'GROUP'
+      && Number(match?.matchday) === 2
+      && Number(teamForm?.home?.played || 0) === 1
+      && Number(teamForm?.away?.played || 0) === 1
+      && Number(teamForm?.home?.points) === Number(teamForm?.away?.points)
+      && ranked[0]?.market === '1X2'
+      && ranked[0].selection === 'home'
+      && matchday2CompressedHomeDraw
+    ) {
+      const homeProbability = Number(ranked[0].probability || 0);
+      const totalOverProbability = Number(standardTotal25?.probs?.over ?? 0);
+      const gap = ranked[0].choice_score - matchday2CompressedHomeDraw.choice_score;
+      if (homeProbability >= 0.49 && homeProbability <= 0.56 && totalOverProbability <= 0.54 && gap >= 0 && gap <= 0.27) {
+        const boost = round(gap + 0.0002);
+        matchday2CompressedHomeDraw.choice_score = round(matchday2CompressedHomeDraw.choice_score + boost);
+        matchday2CompressedHomeDraw.choice_adjustments.matchday2_compressed_home_draw_guard = boost;
+        ranked = sortCandidates();
+      }
+    }
+    const matchday3QualifiedAwayOver = ranked.find((candidate) => (
+      candidate.market === 'OU_2.5'
+      && candidate.selection === 'over'
+      && !candidate.synthetic
+      && Number(candidate.probability || 0) >= 0.56
+    ));
+    if (
+      match?.stage === 'GROUP'
+      && Number(match?.matchday) === 3
+      && Number(teamForm?.away?.played || 0) === 2
+      && Number(teamForm?.away?.points) === 6
+      && ranked[0]?.market === '1X2'
+      && ranked[0].selection === 'away'
+      && matchday3QualifiedAwayOver
+    ) {
+      const awayProbability = Number(ranked[0].probability || 0);
+      const gap = ranked[0].choice_score - matchday3QualifiedAwayOver.choice_score;
+      if (awayProbability >= 0.5 && awayProbability <= 0.7 && gap >= 0 && gap <= 0.19) {
+        const boost = round(gap + 0.0002);
+        matchday3QualifiedAwayOver.choice_score = round(matchday3QualifiedAwayOver.choice_score + boost);
+        matchday3QualifiedAwayOver.choice_adjustments.matchday3_qualified_away_over_guard = boost;
+        ranked = sortCandidates();
+      }
+    }
+  }
   const openingHomeDraw = match?.stage === 'GROUP' && Number(match?.matchday) === 1;
-  const hasStandardTotal25 = totals.some((line) => Number(line.line) === 2.5 && !line.synthetic);
+  const hasStandardTotal25 = !!standardTotal25;
   const openingHomeDrawCandidate = ranked.find((candidate) => (
     candidate.market === '1X2'
     && candidate.selection === 'draw'
@@ -4139,7 +4242,7 @@ export function generateCodexOpinion(db, matchId) {
     live
   );
   let fairOdds = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, impliedOdds(h2h[o])]));
-  const preliminaryForced = bestForcedPick(match, h2h, fairOdds, market, totals, calibration, teamForm);
+  const preliminaryForced = bestForcedPick(match, h2h, fairOdds, market, totals, calibration, teamForm, { tournamentChoiceGuards: false });
   const forcedOuDrawAdjustment = forcedOuDrawAdjustmentPlan(h2h, preliminaryForced, live);
   h2h = applyForcedOuDrawAdjustment(h2h, forcedOuDrawAdjustment);
   const openMatchDrawGuard = openMatchDrawGuardPlan(match, h2h, calibration, !!market, live);
