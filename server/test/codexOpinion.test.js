@@ -109,7 +109,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_team_form_contrarian_draw_forced_scenario_alignment_final_ou_34_top_cap_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_team_form_contrarian_draw_forced_scenario_alignment_final_ou_split_34_top_cap_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -407,12 +407,35 @@ test('generateCodexOpinion : bascule un favori exterieur J1 moyen vers Under 2.5
   assert.equal(uncertainty.favorite, 'away');
   assert.equal(uncertainty.top_outcome, 'away');
   assert.equal(uncertainty.target_top_probability, 0.34);
+  assert.equal(uncertainty.draw_share, 0.7);
+  assert.equal(uncertainty.opposite_share, 0.3);
   assert.ok(uncertainty.transfer_delta > 0);
+  assert.ok(uncertainty.deltas.draw > uncertainty.deltas.home);
   assert.ok(opinion.probabilities.away <= 0.35);
   assert.ok(opinion.probabilities.away < expectation.away);
   assert.ok(opinion.probabilities.draw > expectation.draw);
   assert.ok(opinion.probabilities.home > expectation.home);
   assert.match(opinion.summary, /Choix O\/U final/);
+});
+
+test('generateCodexOpinion : redistribue un choix Over vers le scenario oppose plus que vers le nul', () => {
+  const db = freshDb();
+  insertH2hOdds(db, [['home', 1.90], ['draw', 3.70], ['away', 4.10]]);
+  insertTotalOdds(db, 2.5, 1.58, 2.60, { bookmakers: ['book-a', 'book-b', 'book-c', 'book-d'] });
+
+  const opinion = generateCodexOpinion(db, 1);
+  const forced = opinion.diagnostics.forced_choice;
+  const uncertainty = opinion.diagnostics.final_ou_h2h_uncertainty;
+
+  assert.equal(forced.market, 'OU_2.5');
+  assert.equal(forced.selection, 'over');
+  assert.equal(uncertainty.available, true);
+  assert.equal(uncertainty.applied, true);
+  assert.equal(uncertainty.top_outcome, 'home');
+  assert.equal(uncertainty.draw_share, 0.2);
+  assert.equal(uncertainty.opposite_share, 0.8);
+  assert.ok(uncertainty.deltas.away > uncertainty.deltas.draw);
+  assert.ok(opinion.probabilities.home <= 0.35);
 });
 
 test('generateCodexOpinion : releve la queue de nul dun favori extreme en ouverture', () => {
