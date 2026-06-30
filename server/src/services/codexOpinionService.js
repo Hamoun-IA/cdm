@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v60';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v61';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -94,7 +94,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v59' || version === 'codex-book-v58' || version === 'codex-book-v57' || version === 'codex-book-v56' || version === 'codex-book-v55' || version === 'codex-book-v54' || version === 'codex-book-v53' || version === 'codex-book-v52' || version === 'codex-book-v51' || version === 'codex-book-v50' || version === 'codex-book-v49' || version === 'codex-book-v48' || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v60' || version === 'codex-book-v59' || version === 'codex-book-v58' || version === 'codex-book-v57' || version === 'codex-book-v56' || version === 'codex-book-v55' || version === 'codex-book-v54' || version === 'codex-book-v53' || version === 'codex-book-v52' || version === 'codex-book-v51' || version === 'codex-book-v50' || version === 'codex-book-v49' || version === 'codex-book-v48' || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -333,6 +333,8 @@ function hasTournamentChoiceGuard(diagnostics) {
     'opening_home_favorite_low_total_draw_guard',
     'opening_low_depth_over15_standard_under_guard',
     'matchday2_compressed_home_draw_guard',
+    'matchday2_zero_points_under_guard',
+    'matchday2_zero_points_strong_home_under35_guard',
     'matchday3_desperation_home_guard',
     'matchday3_compact_home_draw_guard',
     'matchday3_qualified_away_over_guard',
@@ -3248,6 +3250,8 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration, teamF
       opening_home_favorite_low_total_draw_guard: 0,
       opening_low_depth_over15_standard_under_guard: 0,
       matchday2_compressed_home_draw_guard: 0,
+      matchday2_zero_points_under_guard: 0,
+      matchday2_zero_points_strong_home_under35_guard: 0,
       matchday3_desperation_home_guard: 0,
       matchday3_compact_home_draw_guard: 0,
       matchday3_qualified_away_over_guard: 0,
@@ -3479,6 +3483,60 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration, teamF
         const boost = round(gap + 0.0002);
         matchday2CompressedHomeDraw.choice_score = round(matchday2CompressedHomeDraw.choice_score + boost);
         matchday2CompressedHomeDraw.choice_adjustments.matchday2_compressed_home_draw_guard = boost;
+        ranked = sortCandidates();
+      }
+    }
+    const matchday2ZeroPointsUnder = ranked.find((candidate) => (
+      candidate.market === 'OU_2.5'
+      && candidate.selection === 'under'
+      && !candidate.synthetic
+      && Number(candidate.probability || 0) >= 0.535
+      && Number(candidate.source_books || 0) >= 8
+    ));
+    if (
+      match?.stage === 'GROUP'
+      && Number(match?.matchday) === 2
+      && Number(teamForm?.home?.played || 0) === 1
+      && Number(teamForm?.away?.played || 0) === 1
+      && Number(teamForm?.home?.points) === 0
+      && Number(teamForm?.away?.points) === 0
+      && ranked[0]?.market === '1X2'
+      && ['home', 'draw'].includes(ranked[0].selection)
+      && matchday2ZeroPointsUnder
+    ) {
+      const gap = ranked[0].choice_score - matchday2ZeroPointsUnder.choice_score;
+      if (gap >= 0 && gap <= 0.125) {
+        const boost = round(gap + 0.0002);
+        matchday2ZeroPointsUnder.choice_score = round(matchday2ZeroPointsUnder.choice_score + boost);
+        matchday2ZeroPointsUnder.choice_adjustments.matchday2_zero_points_under_guard = boost;
+        ranked = sortCandidates();
+      }
+    }
+    const matchday2ZeroPointsStrongHomeUnder35 = ranked.find((candidate) => (
+      candidate.market === 'OU_3.5'
+      && candidate.selection === 'under'
+      && !candidate.synthetic
+      && Number(candidate.probability || 0) >= 0.57
+      && Number(candidate.source_books || 0) >= 4
+    ));
+    if (
+      match?.stage === 'GROUP'
+      && Number(match?.matchday) === 2
+      && Number(teamForm?.home?.played || 0) === 1
+      && Number(teamForm?.away?.played || 0) === 1
+      && Number(teamForm?.home?.points) === 0
+      && Number(teamForm?.away?.points) === 0
+      && ranked[0]?.market === '1X2'
+      && ranked[0].selection === 'home'
+      && matchday2ZeroPointsStrongHomeUnder35
+    ) {
+      const homeProbability = Number(ranked[0].probability || h2h.home || 0);
+      const awayProbability = Number(h2h.away || 0);
+      const gap = ranked[0].choice_score - matchday2ZeroPointsStrongHomeUnder35.choice_score;
+      if (homeProbability >= 0.64 && homeProbability <= 0.72 && awayProbability <= 0.04 && gap >= 0 && gap <= 0.18) {
+        const boost = round(gap + 0.0002);
+        matchday2ZeroPointsStrongHomeUnder35.choice_score = round(matchday2ZeroPointsStrongHomeUnder35.choice_score + boost);
+        matchday2ZeroPointsStrongHomeUnder35.choice_adjustments.matchday2_zero_points_strong_home_under35_guard = boost;
         ranked = sortCandidates();
       }
     }
