@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v12';
+const MODEL_VERSION = 'codex-book-v13';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -941,6 +941,68 @@ function applyRestH2hAdjustment(probs, restPlan) {
   return normalize(Object.fromEntries(Object.entries(out).map(([k, v]) => [k, clamp(v, 0.025, 0.94)])));
 }
 
+function knockoutRegulationAdjustmentPlan(match, probs, hasMarket) {
+  const knockout = !!(match?.stage && match.stage !== 'GROUP');
+  const base = {
+    available: knockout,
+    knockout,
+    stage: match?.stage || null,
+    favorite: null,
+    favorite_prob: null,
+    draw_prob: probs?.draw == null ? null : round(probs.draw),
+    target_draw: null,
+    draw_delta: 0,
+    deltas: { home: 0, draw: 0, away: 0 },
+    applied: false,
+  };
+  if (!knockout || !validH2h(probs)) return base;
+  const favorite = H2H_OUTCOMES.reduce((acc, o) => probs[o] > probs[acc] ? o : acc, 'home');
+  if (favorite === 'draw') {
+    return {
+      ...base,
+      favorite,
+      favorite_prob: round(probs[favorite]),
+    };
+  }
+
+  const favoriteProb = Number(probs[favorite]);
+  const drawProb = Number(probs.draw);
+  const targetDraw = favoriteProb >= 0.68 ? 0.255 : favoriteProb >= 0.58 ? 0.265 : 0.285;
+  const shortfallDelta = Math.max(0, targetDraw - drawProb) * 0.28;
+  const favoriteCompression = Math.max(0, favoriteProb - 0.58) * 0.08;
+  const maxMove = hasMarket ? 0.028 : 0.018;
+  const drawDelta = clamp(shortfallDelta + favoriteCompression, 0, maxMove);
+  const other = favorite === 'home' ? 'away' : 'home';
+  const applied = drawDelta >= 0.0035;
+  const deltas = { home: 0, draw: 0, away: 0 };
+  if (applied) {
+    deltas.draw = round(drawDelta);
+    deltas[favorite] = round(-drawDelta * 0.72);
+    deltas[other] = round(-drawDelta * 0.28);
+  }
+
+  return {
+    ...base,
+    favorite,
+    favorite_prob: round(favoriteProb),
+    draw_prob: round(drawProb),
+    target_draw: round(targetDraw),
+    draw_delta: applied ? round(drawDelta) : 0,
+    deltas,
+    max_move: round(maxMove),
+    applied,
+  };
+}
+
+function applyKnockoutRegulationAdjustment(probs, plan) {
+  if (!plan?.available || !plan.applied) return probs;
+  const adjusted = {};
+  for (const outcome of H2H_OUTCOMES) {
+    adjusted[outcome] = clamp(probs[outcome] + Number(plan.deltas?.[outcome] || 0), 0.025, 0.94);
+  }
+  return normalize(adjusted);
+}
+
 function applyRestTotalsAdjustment(lines, restPlan) {
   const delta = Number(restPlan?.totals_delta || 0);
   if (!restPlan?.available || Math.abs(delta) < 0.0001) {
@@ -1776,7 +1838,13 @@ function restContextSummary(match, rest, restAdjustment) {
   return ` Recuperation KO integree : ${parts.join('; ')}.`;
 }
 
-function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment) {
+function knockoutRegulationSummary(match, adjustment) {
+  if (!adjustment?.available || !adjustment.applied) return '';
+  const favorite = adjustment.favorite ? teamName(match, adjustment.favorite) : 'le favori';
+  return ` Format KO 90 min integre : ${favorite} est legerement compresse et le nul reglementaire reprend ${(Number(adjustment.draw_delta || 0) * 100).toFixed(1)} point.`;
+}
+
+function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment) {
   const ordered = H2H_OUTCOMES.slice().sort((a, b) => h2h[b] - h2h[a]);
   const fav = ordered[0];
   const favName = teamName(match, fav);
@@ -1797,10 +1865,11 @@ function summarize(match, h2h, totals, forced, conf, sources, calibration, teamF
   const depth = totalsDepthSummary(totals);
   const goalsPace = tournamentGoalsSummary(goalsContext, totals);
   const rest = restContextSummary(match, restContext, restAdjustment);
+  const knockoutRegulation = knockoutRegulationSummary(match, knockoutRegulationAdjustment);
   const learned = calibrationSummary(calibration, regimeCalibration);
   return {
     headline: `${favName} ${h2h[fav] >= 0.5 ? 'net favori Codex' : 'léger avantage Codex'}`,
-    summary: `${lead}${ou}${liveText}${movement}${totalsMove} ${data}${form}${rest}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
+    summary: `${lead}${ou}${liveText}${movement}${totalsMove} ${data}${form}${rest}${knockoutRegulation}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
   };
 }
 
@@ -2065,6 +2134,8 @@ export function generateCodexOpinion(db, matchId) {
   h2h = applyTeamFormAdjustment(h2h, teamForm, teamFormAdjustment);
   h2h = applyRestH2hAdjustment(h2h, restAdjustment);
   h2h = applyH2hMarketMovement(h2h, marketMovementAdjustment);
+  const knockoutRegulationAdjustment = knockoutRegulationAdjustmentPlan(match, h2h, !!market);
+  h2h = applyKnockoutRegulationAdjustment(h2h, knockoutRegulationAdjustment);
   h2h = applyHistoricalCalibration(h2h, calibration);
   const regimeCalibration = applyRegimeCalibration(h2h, calibration);
   h2h = regimeCalibration.probs;
@@ -2162,6 +2233,7 @@ export function generateCodexOpinion(db, matchId) {
       ...restContext,
       adjustment: restAdjustment,
     },
+    knockout_regulation_adjustment: knockoutRegulationAdjustment,
     market_movement: marketMovement,
     h2h_market_movement_adjustment: marketMovementAdjustment,
     totals_market_movement: totalsMovement,
@@ -2204,10 +2276,10 @@ export function generateCodexOpinion(db, matchId) {
     live_score_changed: liveScoreChanged,
   };
   const changes = changeSummary(previous, sources);
-  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment);
+  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_power_rating_regime_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_power_rating_regime_calibrated`,
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_knockout90_power_rating_regime_calibrated`,
     h2h_books: market?.books || 0,
     prior: prior.context,
     market_movement: marketMovement,
@@ -2242,6 +2314,7 @@ export function generateCodexOpinion(db, matchId) {
     tournament_goals: goalsContext,
     team_form: { ...teamForm, adjustment: teamFormAdjustment },
     rest_context: { ...restContext, adjustment: restAdjustment },
+    knockout_regulation_adjustment: knockoutRegulationAdjustment,
     live_context: live,
   };
 
