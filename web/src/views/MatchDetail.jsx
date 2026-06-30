@@ -243,7 +243,8 @@ function CodexCombo({ combo, onGenerate, pending, error }) {
   if (!combo) return null;
   const legs = combo.legs || [];
   const missing = combo.missing_matches || [];
-  const canGenerate = !combo.ready || missing.length > 0;
+  const stale = combo.stale_matches || [];
+  const canGenerate = !combo.ready || missing.length > 0 || stale.length > 0;
   return (
     <div className="card codex-card codex-combo-card">
       <div className="codex-head">
@@ -289,6 +290,12 @@ function CodexCombo({ combo, onGenerate, pending, error }) {
             <b>{missing.map((match) => match.label).join(' · ')}</b>
           </div>
         ) : null}
+        {stale.length ? (
+          <div className="codex-combo-missing">
+            <span>Avis à recalculer</span>
+            <b>{stale.map((match) => match.label).join(' · ')}</b>
+          </div>
+        ) : null}
         {combo.risk_flags?.length ? (
           <div className="codex-combo-risks">
             {combo.risk_flags.map((flag) => <span key={flag}>{flag}</span>)}
@@ -298,7 +305,7 @@ function CodexCombo({ combo, onGenerate, pending, error }) {
           <span className="small muted">{combo.disclaimer}</span>
           {canGenerate ? (
             <button className="ghost" disabled={pending} onClick={onGenerate}>
-              {pending ? 'Préparation…' : 'Préparer le combiné'}
+              {pending ? 'Préparation…' : stale.length && !missing.length ? 'Recalculer le combiné' : 'Préparer le combiné'}
             </button>
           ) : null}
         </div>

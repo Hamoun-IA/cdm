@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openAt } from '../src/db.js';
 import { codexComboForMatch } from '../src/services/codexComboService.js';
+import { CURRENT_CODEX_MODEL_VERSION } from '../src/services/codexOpinionService.js';
 
 function freshDb() {
   const db = openAt(':memory:');
@@ -52,6 +53,26 @@ function round4(n) {
   return Math.round(n * 10000) / 10000;
 }
 
+function insertOldOpinion(db, matchId) {
+  db.prepare(`
+    INSERT INTO codex_opinions (
+      match_id, previous_opinion_id, model_version, input_hash, headline, summary,
+      forced_pick_market, forced_pick_selection, forced_pick_label, confidence_score,
+      probabilities_json, fair_odds_json, totals_json, diagnostics_json, change_summary, generated_at
+    )
+    VALUES (
+      @matchId, NULL, 'codex-book-v43', @inputHash, 'Ancien avis', 'Ancien avis',
+      '1X2', 'home', 'Domicile', 55,
+      '{"home":0.52,"draw":0.28,"away":0.20}',
+      '{"home":1.92,"draw":3.57,"away":5.00}',
+      '[]',
+      '{}',
+      'Ancien avis',
+      '2026-06-18T09:00:00Z'
+    )
+  `).run({ matchId, inputHash: `old-${matchId}` });
+}
+
 test('codexComboForMatch : cible les deux derniers matchs de la journee du match', () => {
   const db = freshDb();
   const combo = codexComboForMatch(db, 1);
@@ -80,4 +101,29 @@ test('codexComboForMatch : prepare les avis manquants et calcule le combine', ()
 
   codexComboForMatch(db, 2, { generateMissing: true });
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM codex_opinions').get().n, 2);
+});
+
+test('codexComboForMatch : signale puis regenere les avis obsoletes', () => {
+  const db = freshDb();
+  insertMarket(db, 2, { home: 2.05, draw: 3.30, away: 3.95, over: 1.92, under: 1.94 });
+  insertMarket(db, 3, { home: 1.72, draw: 3.75, away: 5.40, over: 2.10, under: 1.76 });
+  insertOldOpinion(db, 2);
+  insertOldOpinion(db, 3);
+
+  const stale = codexComboForMatch(db, 2);
+
+  assert.equal(stale.ready, false);
+  assert.equal(stale.headline, 'Combiné Codex à recalculer');
+  assert.deepEqual(stale.missing_matches, []);
+  assert.deepEqual(stale.stale_matches.map((match) => match.id), [2, 3]);
+
+  const combo = codexComboForMatch(db, 2, { generateMissing: true });
+
+  assert.equal(combo.ready, true);
+  assert.equal(combo.stale_matches.length, 0);
+  assert.equal(combo.legs.every((leg) => leg.opinion_model_version === CURRENT_CODEX_MODEL_VERSION), true);
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS n FROM codex_opinions WHERE model_version = ?').get(CURRENT_CODEX_MODEL_VERSION).n,
+    2,
+  );
 });

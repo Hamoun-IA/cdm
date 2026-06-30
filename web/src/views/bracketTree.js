@@ -16,7 +16,20 @@ export const TREE = {
   headH: 42,
 };
 
-export const BRACKET_TOPOLOGY_VERSION = 'dependency-v7';
+export const BRACKET_TOPOLOGY_VERSION = 'dependency-v8';
+
+const OFFICIAL_R16_ENTRANTS = new Map([
+  [89, [74, 77]],
+  [90, [73, 75]],
+  [91, [76, 78]],
+  [92, [79, 80]],
+  [93, [83, 84]],
+  [94, [81, 82]],
+  [95, [86, 88]],
+  [96, [85, 87]],
+]);
+
+const OFFICIAL_R16_ORDER = [...OFFICIAL_R16_ENTRANTS.keys()];
 
 function uniqueMatchNos(matchNos) {
   const seen = new Set();
@@ -103,8 +116,20 @@ export function buildTree(rounds, third) {
     const descendantNos = new Set(descendantsOf(rootNo));
     const leavesFromR16 = r16
       .filter((match) => descendantNos.has(Number(match.fifa_match_number)))
-      .sort((a, b) => Number(a.fifa_match_number) - Number(b.fifa_match_number))
-      .flatMap((match) => refsOf(match, 'W'));
+      .sort((a, b) => {
+        const ai = OFFICIAL_R16_ORDER.indexOf(Number(a.fifa_match_number));
+        const bi = OFFICIAL_R16_ORDER.indexOf(Number(b.fifa_match_number));
+        return (ai === -1 ? Number(a.fifa_match_number) : ai)
+          - (bi === -1 ? Number(b.fifa_match_number) : bi);
+      })
+      .flatMap((match) => {
+        const matchNo = Number(match.fifa_match_number);
+        const refs = refsOf(match, 'W');
+        const officialRefs = OFFICIAL_R16_ENTRANTS.get(matchNo);
+        if (!officialRefs) return refs;
+        const refsMatchOfficialPair = officialRefs.every((matchNoRef) => refs.includes(matchNoRef));
+        return refsMatchOfficialPair ? officialRefs : refs;
+      });
     return uniqueMatchNos((leavesFromR16.length ? leavesFromR16 : leavesOf(rootNo)))
       .filter((matchNo) => byNumber.has(Number(matchNo)));
   };

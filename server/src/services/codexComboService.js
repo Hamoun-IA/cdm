@@ -1,5 +1,5 @@
 import { brusselsDayBoundsUtc, brusselsDayKey, brusselsTime, nowUtcIso } from '../lib/time.js';
-import { generateCodexOpinion, latestCodexOpinion } from './codexOpinionService.js';
+import { codexOpinionMeta, generateCodexOpinion, latestCodexOpinion } from './codexOpinionService.js';
 
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const DISCLAIMER = "Combiné indicatif : aide à la lecture, jamais un ordre de pari ni une promesse de résultat.";
@@ -117,6 +117,7 @@ function legFromOpinion(match, opinion) {
       status: match.status,
     },
     codex_opinion_id: opinion.id,
+    opinion_model_version: opinion.model_version,
     opinion_generated_at: opinion.generated_at,
     market: opinion.forced_pick_market,
     selection: opinion.forced_pick_selection,
@@ -182,16 +183,20 @@ export function codexComboForMatch(db, matchId, { generateMissing = false } = {}
       summary: 'Il faut deux matchs sur la soirée pour construire un combiné Codex cohérent.',
       legs: [],
       missing_matches: [],
+      stale_matches: [],
       risk_flags: [],
     };
   }
 
   const missing = [];
+  const stale = [];
   const legs = [];
   for (const match of eveningMatches) {
     let opinion = latestCodexOpinion(db, match.id);
-    if (!opinion && generateMissing && match.status !== 'FINISHED') {
+    let meta = codexOpinionMeta(opinion);
+    if ((!opinion || meta.needs_recalculation) && generateMissing && match.status !== 'FINISHED') {
       opinion = generateCodexOpinion(db, match.id);
+      meta = codexOpinionMeta(opinion);
     }
     if (!opinion) {
       missing.push({
@@ -203,19 +208,34 @@ export function codexComboForMatch(db, matchId, { generateMissing = false } = {}
       });
       continue;
     }
+    if (meta.needs_recalculation) {
+      stale.push({
+        id: match.id,
+        label: matchLabel(match),
+        kickoff_utc: match.kickoff_utc,
+        kickoff_brussels: match.kickoff_brussels,
+        status: match.status,
+        opinion_model_version: meta.opinion_model_version,
+        current_model_version: meta.current_model_version,
+      });
+      continue;
+    }
     legs.push(legFromOpinion(match, opinion));
   }
 
-  if (missing.length || legs.length < 2 || legs.some((leg) => !Number.isFinite(Number(leg.probability)))) {
+  if (missing.length || stale.length || legs.length < 2 || legs.some((leg) => !Number.isFinite(Number(leg.probability)))) {
     return {
       ...base,
       ready: false,
-      headline: 'Combiné Codex à préparer',
+      headline: stale.length ? 'Combiné Codex à recalculer' : 'Combiné Codex à préparer',
       summary: missing.length
         ? `Il manque un Avis Codex sur ${missing.map((match) => match.label).join(' et ')}.`
-        : "Les Avis Codex existent, mais une probabilité de sélection manque pour composer le ticket.",
+        : stale.length
+          ? `Un Avis Codex n'est pas au modèle courant sur ${stale.map((match) => match.label).join(' et ')}.`
+          : "Les Avis Codex existent, mais une probabilité de sélection manque pour composer le ticket.",
       legs,
       missing_matches: missing,
+      stale_matches: stale,
       risk_flags: [],
     };
   }
@@ -231,6 +251,7 @@ export function codexComboForMatch(db, matchId, { generateMissing = false } = {}
     summary: comboSummary(legs, combinedProbability, combinedFairOdds),
     legs,
     missing_matches: [],
+    stale_matches: [],
     combined_probability: combinedProbability,
     combined_fair_odds: combinedFairOdds,
     confidence_score: confidence,
