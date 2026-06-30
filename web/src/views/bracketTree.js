@@ -16,7 +16,7 @@ export const TREE = {
   headH: 42,
 };
 
-export const BRACKET_TOPOLOGY_VERSION = 'dependency-v10';
+export const BRACKET_TOPOLOGY_VERSION = 'dependency-v11';
 
 const OFFICIAL_R16_ENTRANTS = new Map([
   [89, [74, 77]],
@@ -30,6 +30,11 @@ const OFFICIAL_R16_ENTRANTS = new Map([
 ]);
 
 const OFFICIAL_R16_ORDER = [...OFFICIAL_R16_ENTRANTS.keys()];
+
+const OFFICIAL_BRANCH_R32_ORDER = new Map([
+  [101, [74, 77, 73, 75, 83, 84, 81, 82]],
+  [102, [76, 78, 79, 80, 86, 88, 85, 87]],
+]);
 
 function uniqueMatchNos(matchNos) {
   const seen = new Set();
@@ -113,6 +118,11 @@ export function buildTree(rounds, third) {
   };
 
   const orderedLeavesFor = (rootNo) => {
+    const officialBranchLeaves = OFFICIAL_BRANCH_R32_ORDER.get(Number(rootNo));
+    if (officialBranchLeaves?.every((matchNo) => byNumber.has(matchNo))) {
+      return officialBranchLeaves;
+    }
+
     const descendantNos = new Set(descendantsOf(rootNo));
     const leavesFromR16 = r16
       .filter((match) => descendantNos.has(Number(match.fifa_match_number)))

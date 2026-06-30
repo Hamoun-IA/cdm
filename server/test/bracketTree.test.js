@@ -69,9 +69,13 @@ test('buildTree : aligne les 8es sur leurs vrais vainqueurs entrants', () => {
   const tree = buildTree(worldCupKnockoutFixture(), m(103, 'THIRD', 'L101', 'L102'));
   assert.equal(tree.topology, BRACKET_TOPOLOGY_VERSION);
   const leftR32 = orderedMatchNosInColumn(tree, 0);
+  const leftR16 = orderedMatchNosInColumn(tree, TREE.nodeW + TREE.gapX);
+  const rightR16 = orderedMatchNosInColumn(tree, (TREE.nodeW + TREE.gapX) * 7);
   const rightR32 = orderedMatchNosInColumn(tree, (TREE.nodeW + TREE.gapX) * 8);
 
   assert.deepEqual(leftR32, [74, 77, 73, 75, 83, 84, 81, 82]);
+  assert.deepEqual(leftR16, [89, 90, 93, 94]);
+  assert.deepEqual(rightR16, [91, 92, 95, 96]);
   assert.deepEqual(rightR32, [76, 78, 79, 80, 86, 88, 85, 87]);
   assert.deepEqual(leftR32.slice(0, 2), [74, 77]);
   assert.notDeepEqual(leftR32.slice(0, 2), [73, 74]);
