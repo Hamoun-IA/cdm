@@ -16,7 +16,7 @@ export const TREE = {
   headH: 42,
 };
 
-export const BRACKET_TOPOLOGY_VERSION = 'dependency-v11';
+export const BRACKET_TOPOLOGY_VERSION = 'dependency-v12';
 
 const OFFICIAL_R16_ENTRANTS = new Map([
   [89, [74, 77]],
@@ -30,6 +30,11 @@ const OFFICIAL_R16_ENTRANTS = new Map([
 ]);
 
 const OFFICIAL_R16_ORDER = [...OFFICIAL_R16_ENTRANTS.keys()];
+
+const OFFICIAL_BRANCH_R16_ORDER = new Map([
+  [101, [89, 90, 93, 94]],
+  [102, [91, 92, 95, 96]],
+]);
 
 const OFFICIAL_BRANCH_R32_ORDER = new Map([
   [101, [74, 77, 73, 75, 83, 84, 81, 82]],
@@ -118,6 +123,17 @@ export function buildTree(rounds, third) {
   };
 
   const orderedLeavesFor = (rootNo) => {
+    const officialBranchR16 = OFFICIAL_BRANCH_R16_ORDER.get(Number(rootNo));
+    if (officialBranchR16) {
+      const officialLeaves = uniqueMatchNos(officialBranchR16.flatMap((matchNo) => {
+        const refs = refsOf(byNumber.get(matchNo), 'W');
+        const officialRefs = OFFICIAL_R16_ENTRANTS.get(matchNo);
+        const entrants = officialRefs?.some((refNo) => byNumber.has(refNo)) ? officialRefs : refs;
+        return entrants.filter((refNo) => byNumber.has(refNo));
+      }));
+      if (officialLeaves.length) return officialLeaves;
+    }
+
     const officialBranchLeaves = OFFICIAL_BRANCH_R32_ORDER.get(Number(rootNo));
     if (officialBranchLeaves?.every((matchNo) => byNumber.has(matchNo))) {
       return officialBranchLeaves;

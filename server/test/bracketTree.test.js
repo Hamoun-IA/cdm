@@ -120,3 +120,19 @@ test('buildTree : conserve l ordre officiel de branche meme si les dependances a
   assertCenteredOnEntrants(tree, 89, 74, 77);
   assert.equal(tree.lines.some((line) => line.key.startsWith('73-89-')), false);
 });
+
+test('buildTree : garde les paires officielles meme avec une branche partielle', () => {
+  const fixture = worldCupKnockoutFixture();
+  fixture.R32 = fixture.R32.filter((match) => Number(match.fifa_match_number) <= 80);
+  fixture.R16 = fixture.R16.filter((match) => Number(match.fifa_match_number) <= 92);
+  fixture.QF = [m(97, 'QF', 'W89', 'W90')];
+  fixture.SF = [m(101, 'SF', 'W97', 'W98')];
+  fixture.FINAL = [m(104, 'FINAL', 'W101', 'W102')];
+
+  const tree = buildTree(fixture, m(103, 'THIRD', 'L101', 'L102'));
+  const leftR32 = orderedMatchNosInColumn(tree, 0);
+
+  assert.deepEqual(leftR32.slice(0, 4), [74, 77, 73, 75]);
+  assertCenteredOnEntrants(tree, 89, 74, 77);
+  assert.equal(tree.lines.some((line) => line.key.startsWith('73-89-')), false);
+});
