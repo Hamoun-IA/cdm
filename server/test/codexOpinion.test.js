@@ -67,7 +67,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v9');
+  assert.equal(opinion.model_version, 'codex-book-v10');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -246,6 +246,20 @@ test('generateCodexOpinion : fonctionne sans cotes avec priors conservateurs', (
   assert.equal(opinion.totals[0].synthetic, true);
   assert.ok(opinion.confidence_score < 50);
   assert.ok(opinion.forced_pick_label);
+});
+
+test('generateCodexOpinion : sans cotes en KO, neutralise le prior domicile et remonte le nul 90 min', () => {
+  const db = freshDb();
+  db.prepare("UPDATE matches SET stage = 'R32', group_code = NULL WHERE id = 1").run();
+
+  const opinion = generateCodexOpinion(db, 1);
+
+  assert.equal(opinion.diagnostics.h2h_books, 0);
+  assert.equal(opinion.diagnostics.prior.source, 'neutral_knockout_prior');
+  assert.ok(opinion.probabilities.draw > 0.3);
+  assert.ok(opinion.probabilities.home - opinion.probabilities.away < 0.03);
+  assert.equal(opinion.totals[0].synthetic, true);
+  assert.ok(opinion.totals[0].probs.over < 0.5);
 });
 
 test('generateCodexOpinion : sans cotes, renforce la forme tournoi et pénalise les O/U synthétiques', () => {
