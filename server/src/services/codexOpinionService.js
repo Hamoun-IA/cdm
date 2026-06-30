@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v37';
+const MODEL_VERSION = 'codex-book-v39';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -1588,8 +1588,8 @@ function openMatchDrawGuardPlan(match, probs, calibration, hasMarket, live) {
     };
   }
 
-  const targetDraw = 0.48;
-  const maxMove = hasMarket ? 0.045 : 0.035;
+  const targetDraw = 0.52;
+  const maxMove = hasMarket ? 0.055 : 0.045;
   const drawDelta = clamp(targetDraw - drawProb, 0, maxMove);
   const applied = drawDelta >= 0.003;
   const overTotal = Math.max(0.001, homeOver + awayOver);
@@ -1617,6 +1617,90 @@ function openMatchDrawGuardPlan(match, probs, calibration, hasMarket, live) {
 }
 
 function applyOpenMatchDrawGuard(probs, plan) {
+  if (!plan?.available || !plan.applied) return probs;
+  const adjusted = {};
+  for (const outcome of H2H_OUTCOMES) {
+    adjusted[outcome] = clamp(probs[outcome] + Number(plan.deltas?.[outcome] || 0), 0.025, 0.94);
+  }
+  return normalize(adjusted);
+}
+
+function drawFavoriteConvictionPlan(probs, calibration, hasMarket, live) {
+  const base = {
+    available: !live?.active,
+    applied: false,
+    favorite: null,
+    draw_prob: probs?.draw == null ? null : round(probs.draw),
+    draw_bias: null,
+    effective_n: null,
+    source_key: 'favorite:draw',
+    target_draw: null,
+    max_move: null,
+    memory_multiplier: null,
+    draw_delta: 0,
+    deltas: { home: 0, draw: 0, away: 0 },
+  };
+  if (live?.active || !validH2h(probs)) return base;
+  const favorite = H2H_OUTCOMES.reduce((acc, o) => probs[o] > probs[acc] ? o : acc, 'home');
+  const drawProb = Number(probs.draw);
+  if (favorite !== 'draw' || drawProb < 0.38 || drawProb >= 0.62) {
+    return {
+      ...base,
+      favorite,
+      draw_prob: round(drawProb),
+    };
+  }
+
+  const source = calibration?.h2h_regimes?.['favorite:draw'];
+  const effectiveN = Number(source?.effective_n || 0);
+  const drawBias = Number(source?.bias?.draw || 0);
+  const homeOver = Math.max(0, -Number(source?.bias?.home || 0));
+  const awayOver = Math.max(0, -Number(source?.bias?.away || 0));
+  if (effectiveN < 5 || drawBias < 0.12 || (homeOver + awayOver) < 0.08) {
+    return {
+      ...base,
+      available: true,
+      favorite,
+      draw_prob: round(drawProb),
+      draw_bias: round(drawBias),
+      effective_n: round(effectiveN, 2),
+    };
+  }
+
+  const targetDraw = 0.56;
+  const maxMove = hasMarket ? 0.045 : 0.035;
+  const memoryMultiplier = 2.2;
+  const drawDelta = clamp(
+    Math.min(targetDraw - drawProb, Math.abs(drawBias) * Number(source.weight || 0) * memoryMultiplier),
+    0,
+    maxMove
+  );
+  const applied = drawDelta >= 0.003;
+  const overTotal = Math.max(0.001, homeOver + awayOver);
+  const deltas = { home: 0, draw: 0, away: 0 };
+  if (applied) {
+    deltas.draw = round(drawDelta);
+    deltas.home = round(-drawDelta * (homeOver / overTotal));
+    deltas.away = round(-drawDelta * (awayOver / overTotal));
+  }
+
+  return {
+    ...base,
+    available: true,
+    applied,
+    favorite,
+    draw_prob: round(drawProb),
+    draw_bias: round(drawBias),
+    effective_n: round(effectiveN, 2),
+    target_draw: round(targetDraw),
+    max_move: round(maxMove),
+    memory_multiplier: round(memoryMultiplier),
+    draw_delta: applied ? round(drawDelta) : 0,
+    deltas,
+  };
+}
+
+function applyDrawFavoriteConviction(probs, plan) {
   if (!plan?.available || !plan.applied) return probs;
   const adjusted = {};
   for (const outcome of H2H_OUTCOMES) {
@@ -2802,12 +2886,17 @@ function openMatchDrawGuardSummary(adjustment) {
   return ` Match ouvert : le replay penalise l'exces d'outsider et rehausse le nul (+${(Number(adjustment.draw_delta || 0) * 100).toFixed(1)} pt).`;
 }
 
+function drawFavoriteConvictionSummary(adjustment) {
+  if (!adjustment?.available || !adjustment.applied) return '';
+  return ` Memoire nul favori : lorsque le nul sort deja en tete, le replay demande plus de conviction (+${(Number(adjustment.draw_delta || 0) * 100).toFixed(1)} pt).`;
+}
+
 function homeFavoriteAwayCompressionSummary(adjustment) {
   if (!adjustment?.available || !adjustment.applied) return '';
   return ` Memoire favori domicile : l'outsider exterieur est compresse (-${(Number(adjustment.compression_delta || 0) * 100).toFixed(1)} pt).`;
 }
 
-function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, strongFavoriteDrawFloorGuard, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, homeFavoriteAwayCompression) {
+function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, strongFavoriteDrawFloorGuard, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression) {
   const ordered = H2H_OUTCOMES.slice().sort((a, b) => h2h[b] - h2h[a]);
   const fav = ordered[0];
   const favName = teamName(match, fav);
@@ -2836,11 +2925,12 @@ function summarize(match, h2h, totals, forced, conf, sources, calibration, teamF
   const groupOpeningDraw = groupOpeningDrawSummary(groupOpeningDrawAdjustment);
   const forcedOuDraw = forcedOuDrawSummary(forcedOuDrawAdjustment);
   const openDrawGuard = openMatchDrawGuardSummary(openMatchDrawGuard);
+  const drawFavorite = drawFavoriteConvictionSummary(drawFavoriteConviction);
   const homeAwayCompression = homeFavoriteAwayCompressionSummary(homeFavoriteAwayCompression);
   const learned = calibrationSummary(calibration, regimeCalibration);
   return {
     headline: `${favName} ${h2h[fav] >= 0.5 ? 'net favori Codex' : 'léger avantage Codex'}`,
-    summary: `${lead}${ou}${liveText}${movement}${totalsMove} ${data}${form}${rest}${knockoutRegulation}${homeDrawGuard}${awayDrawCompression}${koDrawFloor}${strongDrawFloor}${groupOpeningDraw}${forcedOuDraw}${openDrawGuard}${homeAwayCompression}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
+    summary: `${lead}${ou}${liveText}${movement}${totalsMove} ${data}${form}${rest}${knockoutRegulation}${homeDrawGuard}${awayDrawCompression}${koDrawFloor}${strongDrawFloor}${groupOpeningDraw}${forcedOuDraw}${openDrawGuard}${drawFavorite}${homeAwayCompression}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
   };
 }
 
@@ -3151,6 +3241,8 @@ export function generateCodexOpinion(db, matchId) {
   h2h = applyForcedOuDrawAdjustment(h2h, forcedOuDrawAdjustment);
   const openMatchDrawGuard = openMatchDrawGuardPlan(match, h2h, calibration, !!market, live);
   h2h = applyOpenMatchDrawGuard(h2h, openMatchDrawGuard);
+  const drawFavoriteConviction = drawFavoriteConvictionPlan(h2h, calibration, !!market, live);
+  h2h = applyDrawFavoriteConviction(h2h, drawFavoriteConviction);
   const homeFavoriteAwayCompression = homeFavoriteAwayCompressionPlan(h2h, calibration, !!market, live);
   h2h = applyHomeFavoriteAwayCompression(h2h, homeFavoriteAwayCompression);
   fairOdds = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, impliedOdds(h2h[o])]));
@@ -3237,6 +3329,7 @@ export function generateCodexOpinion(db, matchId) {
     group_opening_draw_adjustment: groupOpeningDrawAdjustment,
     forced_ou_draw_adjustment: forcedOuDrawAdjustment,
     open_match_draw_guard: openMatchDrawGuard,
+    draw_favorite_conviction: drawFavoriteConviction,
     home_favorite_away_compression: homeFavoriteAwayCompression,
     market_movement: marketMovement,
     h2h_market_movement_adjustment: marketMovementAdjustment,
@@ -3284,10 +3377,10 @@ export function generateCodexOpinion(db, matchId) {
     live_score_changed: liveScoreChanged,
   };
   const changes = changeSummary(previous, sources);
-  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, strongFavoriteDrawFloorGuard, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, homeFavoriteAwayCompression);
+  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, strongFavoriteDrawFloorGuard, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_group_opening_forced_ou_open_match_home_away_compression_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_knockout90_power_rating_regime_draw_guard_group_opening_forced_ou_open_match_home_away_compression_line_calibrated`,
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_group_opening_forced_ou_open_match_draw_favorite_home_away_compression_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_knockout90_power_rating_regime_draw_guard_group_opening_forced_ou_open_match_draw_favorite_home_away_compression_line_calibrated`,
     h2h_books: market?.books || 0,
     prior: prior.context,
     market_movement: marketMovement,
@@ -3337,6 +3430,7 @@ export function generateCodexOpinion(db, matchId) {
     group_opening_draw_adjustment: groupOpeningDrawAdjustment,
     forced_ou_draw_adjustment: forcedOuDrawAdjustment,
     open_match_draw_guard: openMatchDrawGuard,
+    draw_favorite_conviction: drawFavoriteConviction,
     home_favorite_away_compression: homeFavoriteAwayCompression,
     live_context: live,
   };

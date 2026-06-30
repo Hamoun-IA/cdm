@@ -81,13 +81,13 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v37');
+  assert.equal(opinion.model_version, 'codex-book-v39');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_group_opening_forced_ou_open_match_home_away_compression_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_group_opening_forced_ou_open_match_draw_favorite_home_away_compression_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -963,14 +963,62 @@ test('generateCodexOpinion : renforce le nul des matchs ouverts quand le replay 
   assert.equal(guard.available, true);
   assert.equal(guard.applied, true);
   assert.equal(guard.source_key, 'confidence:open');
-  assert.equal(guard.target_draw, 0.48);
-  assert.equal(guard.max_move, 0.045);
+  assert.equal(guard.target_draw, 0.52);
+  assert.equal(guard.max_move, 0.055);
   assert.ok(guard.favorite_prob < 0.5);
   assert.ok(guard.draw_delta > 0);
   assert.ok(guard.deltas.draw > 0);
   assert.ok(guard.deltas.away < guard.deltas.home);
   assert.ok(opinion.probabilities.draw > guard.draw_prob);
   assert.match(opinion.summary, /Match ouvert/);
+});
+
+test('generateCodexOpinion : renforce le nul quand il est deja favori et confirme par l historique', () => {
+  const db = freshDb();
+  db.prepare('UPDATE matches SET matchday = 2 WHERE id = 1').run();
+  db.prepare("INSERT INTO teams (id, fifa_code, name, group_code) VALUES (3,'TST','Temoin A','A'), (4,'TSB','Temoin B','A')").run();
+  for (const bookmaker of ['book-a', 'book-b', 'book-c']) {
+    for (const [outcome, price] of [['home', 3.40], ['draw', 2.45], ['away', 3.80]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+  }
+  for (let id = 2; id <= 11; id++) {
+    insertTeamResult(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      home: 3,
+      away: 4,
+      homeScore: 1,
+      awayScore: 1,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-09T00:00:00Z',
+      modelVersion: 'codex-book-v36',
+      probabilities: { home: 0.31, draw: 0.43, away: 0.26 },
+      forcedMarket: '1X2',
+      forcedSelection: 'draw',
+    });
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const guard = opinion.diagnostics.draw_favorite_conviction;
+
+  assert.equal(guard.available, true);
+  assert.equal(guard.applied, true);
+  assert.equal(guard.source_key, 'favorite:draw');
+  assert.ok(guard.effective_n >= 5);
+  assert.ok(guard.draw_bias >= 0.12);
+  assert.equal(guard.target_draw, 0.56);
+  assert.ok(guard.draw_delta > 0);
+  assert.ok(guard.deltas.draw > 0);
+  assert.ok(guard.deltas.home < 0);
+  assert.ok(guard.deltas.away < 0);
+  assert.ok(opinion.probabilities.draw > guard.draw_prob);
+  assert.match(opinion.summary, /Memoire nul favori/);
 });
 
 test('generateCodexOpinion : compresse l outsider exterieur des favoris domicile sur historique confirme', () => {
