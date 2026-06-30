@@ -16,8 +16,8 @@ function freshDb() {
   return db;
 }
 
-function insertH2hOdds(db, prices, { matchId = 1, takenAt = '2026-06-11T08:00:00Z' } = {}) {
-  for (const bookmaker of ['book-a', 'book-b']) {
+function insertH2hOdds(db, prices, { matchId = 1, takenAt = '2026-06-11T08:00:00Z', bookmakers = ['book-a', 'book-b'] } = {}) {
+  for (const bookmaker of bookmakers) {
     for (const [outcome, price] of prices) {
       db.prepare(`
         INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
@@ -27,8 +27,8 @@ function insertH2hOdds(db, prices, { matchId = 1, takenAt = '2026-06-11T08:00:00
   }
 }
 
-function insertTotalOdds(db, point, over, under, { matchId = 1, takenAt = '2026-06-11T08:00:00Z' } = {}) {
-  for (const bookmaker of ['book-a', 'book-b']) {
+function insertTotalOdds(db, point, over, under, { matchId = 1, takenAt = '2026-06-11T08:00:00Z', bookmakers = ['book-a', 'book-b'] } = {}) {
+  for (const bookmaker of bookmakers) {
     for (const [side, price] of [['over', over], ['under', under]]) {
       db.prepare(`
         INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, point, price, taken_at)
@@ -352,6 +352,187 @@ test('generateCodexOpinion : bascule un favori exterieur qualifie J3 vers Over 2
   assert.equal(forced.market, 'OU_2.5');
   assert.equal(forced.selection, 'over');
   assert.ok(forced.choice_adjustments.matchday3_qualified_away_over_guard > 0);
+});
+
+test('generateCodexOpinion : echappe dun Under 2.5 J1 central vers Over 1.5', () => {
+  const db = freshDb();
+  const deepBooks = Array.from({ length: 10 }, (_, index) => `book-${index}`);
+  insertH2hOdds(db, [['home', 2.50], ['draw', 3.20], ['away', 3.50]]);
+  insertTotalOdds(db, 1.5, 1.45, 3.00, { bookmakers: ['thin-book'] });
+  insertTotalOdds(db, 2.5, 2.35, 1.65, { bookmakers: deepBooks });
+
+  const opinion = generateCodexOpinion(db, 1);
+  const forced = opinion.diagnostics.forced_choice;
+
+  assert.equal(forced.preliminary_market, 'OU_2.5');
+  assert.equal(forced.preliminary_selection, 'under');
+  assert.equal(forced.market, 'OU_1.5');
+  assert.equal(forced.selection, 'over');
+  assert.ok(forced.choice_adjustments.opening_total_under_escape_guard > 0);
+});
+
+test('generateCodexOpinion : force le nul J1 dun favori domicile avec total bas', () => {
+  const db = freshDb();
+  const deepBooks = Array.from({ length: 10 }, (_, index) => `book-${index}`);
+  insertH2hOdds(db, [['home', 1.62], ['draw', 4.10], ['away', 8.00]]);
+  insertTotalOdds(db, 2.5, 2.05, 1.90, { bookmakers: deepBooks });
+
+  const opinion = generateCodexOpinion(db, 1);
+  const forced = opinion.diagnostics.forced_choice;
+
+  assert.equal(forced.preliminary_market, '1X2');
+  assert.equal(forced.preliminary_selection, 'home');
+  assert.equal(forced.market, '1X2');
+  assert.equal(forced.selection, 'draw');
+  assert.ok(forced.choice_adjustments.opening_home_favorite_low_total_draw_guard > 0);
+});
+
+test('generateCodexOpinion : prefere Under 2.5 a un Over 1.5 peu profond quand la ligne standard est appuyee', () => {
+  const db = freshDb();
+  const deepBooks = Array.from({ length: 10 }, (_, index) => `book-${index}`);
+  db.prepare(`
+    INSERT INTO teams (id, fifa_code, name, group_code)
+    VALUES (3, 'T3', 'Equipe 3', 'A'), (4, 'T4', 'Equipe 4', 'A')
+  `).run();
+  for (let id = 2; id <= 5; id += 1) {
+    insertTeamResult(db, {
+      id,
+      kickoff: '2026-06-10T10:00:00Z',
+      home: 3,
+      away: 4,
+      homeScore: 2,
+      awayScore: 1,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-10T09:00:00Z',
+      modelVersion: 'codex-book-v59',
+      probabilities: { home: 0.40, draw: 0.30, away: 0.30 },
+      totals: [{ line: 2.5, probs: { over: 0.42, under: 0.58 }, fair_odds: { over: 2.38, under: 1.72 }, synthetic: false }],
+      forcedMarket: 'OU_2.5',
+      forcedSelection: 'under',
+    });
+  }
+  insertH2hOdds(db, [['home', 2.45], ['draw', 3.10], ['away', 3.50]]);
+  insertTotalOdds(db, 1.5, 1.45, 3.00, { bookmakers: ['thin-book'] });
+  insertTotalOdds(db, 2.5, 2.35, 1.65, { bookmakers: deepBooks });
+
+  const opinion = generateCodexOpinion(db, 1);
+  const forced = opinion.diagnostics.forced_choice;
+
+  assert.equal(forced.preliminary_market, 'OU_1.5');
+  assert.equal(forced.preliminary_selection, 'over');
+  assert.equal(forced.market, 'OU_2.5');
+  assert.equal(forced.selection, 'under');
+  assert.ok(forced.choice_adjustments.opening_low_depth_over15_standard_under_guard > 0);
+});
+
+test('generateCodexOpinion : force le domicile J3 quand il doit gagner face a un favori a trois points', () => {
+  const db = freshDb();
+  db.prepare("UPDATE matches SET matchday = 3, kickoff_utc = '2026-06-20T19:00:00Z' WHERE id = 1").run();
+  db.prepare(`
+    INSERT INTO teams (id, fifa_code, name, group_code)
+    VALUES (3, 'T3', 'Equipe 3', 'A'), (4, 'T4', 'Equipe 4', 'A')
+  `).run();
+  insertTeamResult(db, {
+    id: 2,
+    kickoff: '2026-06-11T19:00:00Z',
+    home: 1,
+    away: 3,
+    homeScore: 0,
+    awayScore: 2,
+  });
+  insertTeamResult(db, {
+    id: 3,
+    kickoff: '2026-06-15T19:00:00Z',
+    home: 4,
+    away: 1,
+    homeScore: 0,
+    awayScore: 0,
+  });
+  insertTeamResult(db, {
+    id: 4,
+    kickoff: '2026-06-11T20:00:00Z',
+    home: 2,
+    away: 3,
+    homeScore: 1,
+    awayScore: 0,
+  });
+  insertTeamResult(db, {
+    id: 5,
+    kickoff: '2026-06-15T20:00:00Z',
+    home: 4,
+    away: 2,
+    homeScore: 1,
+    awayScore: 0,
+  });
+  insertH2hOdds(db, [['home', 5.20], ['draw', 4.05], ['away', 1.75]], { takenAt: '2026-06-20T08:00:00Z' });
+  insertTotalOdds(db, 2.5, 2.10, 1.86, { takenAt: '2026-06-20T08:00:00Z', bookmakers: Array.from({ length: 10 }, (_, index) => `book-${index}`) });
+
+  const opinion = generateCodexOpinion(db, 1);
+  const forced = opinion.diagnostics.forced_choice;
+
+  assert.equal(opinion.diagnostics.team_form.home.points, 1);
+  assert.equal(opinion.diagnostics.team_form.away.points, 3);
+  assert.equal(forced.preliminary_market, '1X2');
+  assert.equal(forced.preliminary_selection, 'away');
+  assert.equal(forced.market, '1X2');
+  assert.equal(forced.selection, 'home');
+  assert.ok(forced.choice_adjustments.matchday3_desperation_home_guard > 0);
+});
+
+test('generateCodexOpinion : force le nul J3 quand le favori domicile peut controler la qualification', () => {
+  const db = freshDb();
+  db.prepare("UPDATE matches SET matchday = 3, kickoff_utc = '2026-06-20T19:00:00Z' WHERE id = 1").run();
+  db.prepare(`
+    INSERT INTO teams (id, fifa_code, name, group_code)
+    VALUES (3, 'T3', 'Equipe 3', 'A'), (4, 'T4', 'Equipe 4', 'A')
+  `).run();
+  insertTeamResult(db, {
+    id: 2,
+    kickoff: '2026-06-11T19:00:00Z',
+    home: 1,
+    away: 3,
+    homeScore: 4,
+    awayScore: 0,
+  });
+  insertTeamResult(db, {
+    id: 3,
+    kickoff: '2026-06-15T19:00:00Z',
+    home: 1,
+    away: 4,
+    homeScore: 0,
+    awayScore: 0,
+  });
+  insertTeamResult(db, {
+    id: 4,
+    kickoff: '2026-06-11T20:00:00Z',
+    home: 2,
+    away: 4,
+    homeScore: 1,
+    awayScore: 0,
+  });
+  insertTeamResult(db, {
+    id: 5,
+    kickoff: '2026-06-15T20:00:00Z',
+    home: 3,
+    away: 2,
+    homeScore: 2,
+    awayScore: 1,
+  });
+  insertH2hOdds(db, [['home', 1.95], ['draw', 3.57], ['away', 4.60]], { takenAt: '2026-06-20T08:00:00Z' });
+  insertTotalOdds(db, 2.5, 2.04, 1.94, { takenAt: '2026-06-20T08:00:00Z', bookmakers: Array.from({ length: 10 }, (_, index) => `book-${index}`) });
+
+  const opinion = generateCodexOpinion(db, 1);
+  const forced = opinion.diagnostics.forced_choice;
+
+  assert.equal(opinion.diagnostics.team_form.home.points, 4);
+  assert.equal(opinion.diagnostics.team_form.away.points, 3);
+  assert.equal(forced.preliminary_market, '1X2');
+  assert.equal(forced.preliminary_selection, 'home');
+  assert.equal(forced.market, '1X2');
+  assert.equal(forced.selection, 'draw');
+  assert.ok(forced.choice_adjustments.matchday3_compact_home_draw_guard > 0);
 });
 
 test('generateCodexOpinion : ne rehausse pas le nul groupe apres la premiere journee', () => {
