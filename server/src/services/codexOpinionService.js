@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v75';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v76';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -2501,6 +2501,9 @@ function strongFavoriteDrawTailPlan(match, probs, teamForm, live) {
   const openingGroup = match?.stage === 'GROUP' && Number(match?.matchday) === 1;
   const contrarianGroupJ2 = match?.stage === 'GROUP' && Number(match?.matchday) === 2 && contrarianFavorite;
   const context = openingGroup ? 'group_opening_extreme_favorite' : (contrarianGroupJ2 ? 'group_j2_contrarian_extreme_favorite' : null);
+  const openingAwayFavorite = context === 'group_opening_extreme_favorite' && favorite === 'away';
+  const targetDraw = openingAwayFavorite ? 0.30 : base.target_draw;
+  const maxMove = openingAwayFavorite ? 0.065 : base.max_move;
 
   if (!context || favoriteProb < base.min_favorite_prob || drawProb > base.max_draw_prob) {
     return {
@@ -2509,10 +2512,12 @@ function strongFavoriteDrawTailPlan(match, probs, teamForm, live) {
       favorite,
       favorite_prob: round(favoriteProb),
       draw_prob: round(drawProb),
+      target_draw: round(targetDraw),
+      max_move: round(maxMove),
     };
   }
 
-  const drawDelta = clamp(Math.min(base.target_draw - drawProb, favoriteProb - 0.45), 0, base.max_move);
+  const drawDelta = clamp(Math.min(targetDraw - drawProb, favoriteProb - 0.45), 0, maxMove);
   const applied = drawDelta >= 0.003;
   const deltas = { home: 0, draw: 0, away: 0 };
   if (applied) {
@@ -2527,6 +2532,8 @@ function strongFavoriteDrawTailPlan(match, probs, teamForm, live) {
     favorite,
     favorite_prob: round(favoriteProb),
     draw_prob: round(drawProb),
+    target_draw: round(targetDraw),
+    max_move: round(maxMove),
     draw_delta: applied ? round(drawDelta) : 0,
     deltas,
   };
@@ -2555,8 +2562,8 @@ function teamFormContrarianDrawGuardPlan(match, probs, teamForm, live) {
     opponent_points: null,
     favorite_points_vs_expected: null,
     opponent_points_vs_expected: null,
-    target_draw: 0.315,
-    max_move: 0.045,
+    target_draw: 0.345,
+    max_move: 0.075,
     draw_delta: 0,
     deltas: { home: 0, draw: 0, away: 0 },
   };
@@ -5350,7 +5357,7 @@ export function generateCodexOpinion(db, matchId) {
   const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, knockoutDrawMemoryAdjustment, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression, homeFavoriteOpenAwayTransfer, centralDrawBandAdjustment, strongFavoriteDrawTail, teamFormContrarianDrawGuard, forcedDrawConviction, forcedScenarioAlignment, finalOuH2hUncertainty);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_forced_draw_conviction_team_form_contrarian_draw_forced_scenario_alignment_final_ou_split_33_top_cap_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_forced_draw_conviction_team_form_contrarian_draw_forced_scenario_alignment_final_ou_split_33_top_cap_line_calibrated`,
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away30_forced_draw_conviction_team_form_contrarian_draw345_forced_scenario_alignment_final_ou_split_33_top_cap_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away30_forced_draw_conviction_team_form_contrarian_draw345_forced_scenario_alignment_final_ou_split_33_top_cap_line_calibrated`,
     h2h_books: market?.books || 0,
     prior: prior.context,
     market_movement: marketMovement,
