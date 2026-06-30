@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v63';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v64';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -93,9 +93,16 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
   return round(cap * (n / (n + anchor)));
 }
 
+function codexBookVersionNumber(version) {
+  const match = String(version || '').match(/^codex-book-v(\d+)$/);
+  return match ? Number(match[1]) : null;
+}
+
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v62' || version === 'codex-book-v61' || version === 'codex-book-v60' || version === 'codex-book-v59' || version === 'codex-book-v58' || version === 'codex-book-v57' || version === 'codex-book-v56' || version === 'codex-book-v55' || version === 'codex-book-v54' || version === 'codex-book-v53' || version === 'codex-book-v52' || version === 'codex-book-v51' || version === 'codex-book-v50' || version === 'codex-book-v49' || version === 'codex-book-v48' || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
-  if (version === 'codex-book-v2') return 0.75;
+  const currentVersion = codexBookVersionNumber(MODEL_VERSION);
+  const sampleVersion = codexBookVersionNumber(version);
+  if (sampleVersion != null && currentVersion != null && sampleVersion >= 3 && sampleVersion <= currentVersion) return 1;
+  if (sampleVersion === 2) return 0.75;
   return 0.45;
 }
 

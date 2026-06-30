@@ -281,6 +281,24 @@ test('generateCodexOpinion : baisse la confiance dun favori contredit par la for
   assert.ok(confidenceContext.adjustments.some((item) => item.key === 'team_form_contrarian_favorite_caution'));
 });
 
+test('generateCodexOpinion : conserve le poids plein des avis recents apres bump modele', () => {
+  const db = freshDb();
+  insertFinishedMatch(db, { id: 2, kickoff: '2026-06-10T19:00:00Z', homeScore: 1, awayScore: 0 });
+  insertHistoricalOpinion(db, {
+    matchId: 2,
+    generatedAt: '2026-06-10T12:00:00Z',
+    modelVersion: 'codex-book-v63',
+    probabilities: { home: 0.58, draw: 0.28, away: 0.14 },
+    forcedMarket: '1X2',
+    forcedSelection: 'home',
+  });
+  insertMarket(db);
+
+  const opinion = generateCodexOpinion(db, 1);
+
+  assert.equal(opinion.diagnostics.calibration.h2h.effective_n, 1);
+});
+
 test('generateCodexOpinion : force le nul J2 entre deux vainqueurs avec favori domicile tres bas cote', () => {
   const db = freshDb();
   db.prepare("UPDATE matches SET matchday = 2, kickoff_utc = '2026-06-15T19:00:00Z' WHERE id = 1").run();
