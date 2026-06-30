@@ -67,13 +67,13 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v11');
+  assert.equal(opinion.model_version, 'codex-book-v12');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_power_rating_regime_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_power_rating_regime_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -510,6 +510,33 @@ test('generateCodexOpinion : la forme tournoi ignore le résultat du match coura
   assert.equal(opinion.diagnostics.team_form.home.played, 0);
   assert.equal(opinion.diagnostics.team_form.away.played, 0);
   assert.equal(opinion.diagnostics.team_form.available, false);
+});
+
+test('generateCodexOpinion : applique le mouvement marche 1X2 dans la bonne direction', () => {
+  const db = freshDb();
+  for (const bookmaker of ['book-a', 'book-b', 'book-c']) {
+    for (const [takenAt, home, draw, away] of [
+      ['2026-06-10T08:00:00Z', 1.55, 4.40, 8.00],
+      ['2026-06-11T08:00:00Z', 2.30, 3.40, 3.30],
+    ]) {
+      for (const [outcome, price] of [['home', home], ['draw', draw], ['away', away]]) {
+        db.prepare(`
+          INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+          VALUES (1, @bookmaker, 'h2h', @outcome, @price, @taken_at)
+        `).run({ bookmaker, outcome, price, taken_at: takenAt });
+      }
+    }
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+
+  assert.equal(opinion.diagnostics.market_movement.available, true);
+  assert.equal(opinion.diagnostics.market_movement.leader, 'away');
+  assert.equal(opinion.diagnostics.market_movement.drift_from, 'home');
+  assert.equal(opinion.diagnostics.h2h_market_movement_adjustment.applied, true);
+  assert.ok(opinion.diagnostics.h2h_market_movement_adjustment.deltas.away > 0);
+  assert.ok(opinion.diagnostics.h2h_market_movement_adjustment.deltas.home < 0);
+  assert.match(opinion.summary, /Afrique du Sud/);
 });
 
 function insertFinishedMatch(db, { id, kickoff, homeScore, awayScore }) {

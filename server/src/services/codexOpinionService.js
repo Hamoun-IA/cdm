@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v11';
+const MODEL_VERSION = 'codex-book-v12';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -1145,7 +1145,10 @@ function h2hMarketMovement(rows) {
     return { available: false };
   }
   const delta = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, round(latest.consensus[o] - opening.consensus[o])]));
-  const leader = H2H_OUTCOMES.reduce((acc, o) => Math.abs(delta[o]) > Math.abs(delta[acc]) ? o : acc, 'home');
+  const steamTo = H2H_OUTCOMES.reduce((acc, o) => delta[o] > delta[acc] ? o : acc, 'home');
+  const driftFrom = H2H_OUTCOMES.reduce((acc, o) => delta[o] < delta[acc] ? o : acc, 'home');
+  const absLeader = H2H_OUTCOMES.reduce((acc, o) => Math.abs(delta[o]) > Math.abs(delta[acc]) ? o : acc, 'home');
+  const maxDelta = Math.max(0, delta[steamTo] || 0);
   return {
     available: true,
     opening_at: opening.taken_at,
@@ -1153,9 +1156,52 @@ function h2hMarketMovement(rows) {
     opening_books: opening.books,
     latest_books: latest.books,
     delta,
-    leader,
-    max_delta: round(Math.abs(delta[leader])),
+    leader: steamTo,
+    steam_to: steamTo,
+    drift_from: delta[driftFrom] < 0 ? driftFrom : null,
+    abs_leader: absLeader,
+    max_delta: round(maxDelta),
+    abs_max_delta: round(Math.abs(delta[absLeader])),
   };
+}
+
+function h2hMarketMovementAdjustmentPlan(movement) {
+  if (!movement?.available || !movement.delta || movement.max_delta < 0.012) {
+    return {
+      available: !!movement?.available,
+      applied: false,
+      weight: 0,
+      max_move: 0,
+      deltas: { home: 0, draw: 0, away: 0 },
+    };
+  }
+  const depth = clamp(Number(movement.latest_books || 0) / 12, 0.45, 1);
+  const weight = 0.12 * depth;
+  const maxMove = 0.012;
+  const deltas = Object.fromEntries(H2H_OUTCOMES.map((outcome) => [
+    outcome,
+    round(clamp(Number(movement.delta[outcome] || 0) * weight, -maxMove, maxMove)),
+  ]));
+  const applied = H2H_OUTCOMES.some((outcome) => Math.abs(deltas[outcome]) >= 0.001);
+  return {
+    available: true,
+    applied,
+    weight: round(weight, 3),
+    max_move: maxMove,
+    leader: movement.leader,
+    steam_to: movement.steam_to,
+    drift_from: movement.drift_from,
+    deltas,
+  };
+}
+
+function applyH2hMarketMovement(probs, plan) {
+  if (!plan?.applied) return probs;
+  const adjusted = Object.fromEntries(H2H_OUTCOMES.map((outcome) => [
+    outcome,
+    clamp(probs[outcome] + Number(plan.deltas?.[outcome] || 0), 0.025, 0.94),
+  ]));
+  return normalize(adjusted);
 }
 
 function totalsOutcome(row) {
@@ -2005,6 +2051,7 @@ export function generateCodexOpinion(db, matchId) {
 
   const market = h2hMarket(odds);
   const marketMovement = h2hMarketMovement(odds);
+  const marketMovementAdjustment = h2hMarketMovementAdjustmentPlan(marketMovement);
   const totalsMovement = totalsMarketMovement(odds);
   const teamFormAdjustment = teamFormAdjustmentPlan(teamForm, !!market);
   const restContext = knockoutRestContext(match, teamForm);
@@ -2017,6 +2064,7 @@ export function generateCodexOpinion(db, matchId) {
   h2h = applyQualitativeAdjustments(h2h, { favorite, scorecard, decision });
   h2h = applyTeamFormAdjustment(h2h, teamForm, teamFormAdjustment);
   h2h = applyRestH2hAdjustment(h2h, restAdjustment);
+  h2h = applyH2hMarketMovement(h2h, marketMovementAdjustment);
   h2h = applyHistoricalCalibration(h2h, calibration);
   const regimeCalibration = applyRegimeCalibration(h2h, calibration);
   h2h = regimeCalibration.probs;
@@ -2115,6 +2163,7 @@ export function generateCodexOpinion(db, matchId) {
       adjustment: restAdjustment,
     },
     market_movement: marketMovement,
+    h2h_market_movement_adjustment: marketMovementAdjustment,
     totals_market_movement: totalsMovement,
     tournament_goals: goalsContext,
     totals_depth: totals.map((t) => [
@@ -2158,10 +2207,11 @@ export function generateCodexOpinion(db, matchId) {
   const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_power_rating_regime_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_power_rating_regime_calibrated`,
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_power_rating_regime_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_power_rating_regime_calibrated`,
     h2h_books: market?.books || 0,
     prior: prior.context,
     market_movement: marketMovement,
+    h2h_market_movement_adjustment: marketMovementAdjustment,
     totals_market_movement: totalsMovement,
     totals_lines: totals.map((t) => ({
       line: t.line,
