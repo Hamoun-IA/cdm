@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v28';
+const MODEL_VERSION = 'codex-book-v29';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -2154,6 +2154,11 @@ function syntheticLeanAdjustment(candidate) {
   return -round(clamp((0.55 - probability) * 0.75, 0, 0.035));
 }
 
+function ouCrossMarketFriction(candidate) {
+  if (candidate.market === '1X2') return 0;
+  return -0.025;
+}
+
 function forcedCandidateDiagnostic(candidate) {
   return {
     market: candidate.market,
@@ -2210,8 +2215,9 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
     const reliability = round(marketReliability + marketClassReliability + exactMarketReliability + exactPickReliability);
     const depth = marketDepthAdjustment(candidate);
     const syntheticLean = syntheticLeanAdjustment(candidate);
+    const crossMarketFriction = ouCrossMarketFriction(candidate);
     const edge = candidate.edge == null ? 0 : clamp(candidate.edge * 0.08, -0.012, 0.018);
-    candidate.choice_score = round(candidate.probability + reliability + depth + syntheticLean + edge);
+    candidate.choice_score = round(candidate.probability + reliability + depth + syntheticLean + crossMarketFriction + edge);
     candidate.choice_adjustments = {
       reliability,
       market_reliability: marketReliability,
@@ -2222,6 +2228,7 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
       low_depth_over15_caution: 0,
       low_depth_over15_h2h_guard: 0,
       synthetic_lean: syntheticLean,
+      ou_cross_market_friction: crossMarketFriction,
       edge,
     };
   }
