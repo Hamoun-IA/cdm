@@ -16,12 +16,7 @@ export const TREE = {
   headH: 42,
 };
 
-export const BRACKET_TOPOLOGY_VERSION = 'dependency-v6';
-
-const OFFICIAL_BRANCH_LEAVES = new Map([
-  [101, [74, 77, 73, 75, 83, 84, 81, 82]],
-  [102, [76, 78, 79, 80, 86, 88, 85, 87]],
-]);
+export const BRACKET_TOPOLOGY_VERSION = 'dependency-v7';
 
 function uniqueMatchNos(matchNos) {
   const seen = new Set();
@@ -98,14 +93,27 @@ export function buildTree(rounds, third) {
     return refs.flatMap(leavesOf);
   };
 
+  const descendantsOf = (matchNo) => {
+    const match = byNumber.get(Number(matchNo));
+    const refs = refsOf(match, 'W');
+    return refs.flatMap((refNo) => [refNo, ...descendantsOf(refNo)]);
+  };
+
+  const orderedLeavesFor = (rootNo) => {
+    const descendantNos = new Set(descendantsOf(rootNo));
+    const leavesFromR16 = r16
+      .filter((match) => descendantNos.has(Number(match.fifa_match_number)))
+      .sort((a, b) => Number(a.fifa_match_number) - Number(b.fifa_match_number))
+      .flatMap((match) => refsOf(match, 'W'));
+    return uniqueMatchNos((leavesFromR16.length ? leavesFromR16 : leavesOf(rootNo)))
+      .filter((matchNo) => byNumber.has(Number(matchNo)));
+  };
+
   const placeBranch = ({ rootNo, side }) => {
     const colByStage = side === 'left'
       ? { R32: 0, R16: 1, QF: 2, SF: 3 }
       : { R32: 8, R16: 7, QF: 6, SF: 5 };
-    const recursiveLeaves = uniqueMatchNos(leavesOf(rootNo));
-    const officialLeaves = OFFICIAL_BRANCH_LEAVES.get(Number(rootNo));
-    const officialLeavesAvailable = officialLeaves?.every((matchNo) => byNumber.has(matchNo));
-    const leafNos = (officialLeavesAvailable ? officialLeaves : recursiveLeaves).slice(0, 8);
+    const leafNos = orderedLeavesFor(rootNo).slice(0, 8);
     leafNos.forEach((matchNo, index) => {
       addNode(matchNo, colByStage.R32, index * stepY + nodeH / 2);
     });
