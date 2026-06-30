@@ -109,7 +109,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail55_awaymod60_over_home40_overaway45_topdrawsteam70_top_cap_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod60_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -514,6 +514,60 @@ test('generateCodexOpinion : redistribue un Under final top domicile presque tou
   assert.equal(uncertainty.opposite_share, 0.05);
   assert.ok(uncertainty.deltas.draw > uncertainty.deltas.away * 10);
   assert.ok(opinion.probabilities.draw > opinion.probabilities.home);
+});
+
+test('generateCodexOpinion : reduit le nul Under quand le favori domicile est contredit par la forme et le marche', () => {
+  const db = freshDb();
+  db.prepare('UPDATE matches SET matchday = 2 WHERE id = 1').run();
+  db.prepare("INSERT INTO teams (id, fifa_code, name, group_code) VALUES (3,'T3','Temoin A','A'), (4,'T4','Temoin B','A')").run();
+
+  insertTeamResult(db, { id: 2, kickoff: '2026-06-10T12:00:00Z', home: 1, away: 3, homeScore: 0, awayScore: 2 });
+  insertHistoricalOpinion(db, { matchId: 2, generatedAt: '2026-06-10T10:00:00Z', probabilities: { home: 0.75, draw: 0.15, away: 0.10 }, forcedSelection: 'home' });
+  insertTeamResult(db, { id: 3, kickoff: '2026-06-10T14:00:00Z', home: 4, away: 2, homeScore: 1, awayScore: 0 });
+  insertHistoricalOpinion(db, { matchId: 3, generatedAt: '2026-06-10T11:00:00Z', probabilities: { home: 0.55, draw: 0.20, away: 0.25 }, forcedSelection: 'home' });
+
+  const books = ['book-a', 'book-b', 'book-c'];
+  insertH2hOdds(db, [['home', 1.72], ['draw', 3.80], ['away', 6.00]], { takenAt: '2026-06-10T08:00:00Z', bookmakers: books });
+  insertH2hOdds(db, [['home', 1.85], ['draw', 3.60], ['away', 4.80]], { takenAt: '2026-06-11T08:00:00Z', bookmakers: books });
+  insertTotalOdds(db, 2.5, 2.25, 1.70, { bookmakers: ['book-a', 'book-b', 'book-c', 'book-d'] });
+
+  const opinion = generateCodexOpinion(db, 1);
+  const uncertainty = opinion.diagnostics.final_ou_h2h_uncertainty;
+  const form = opinion.diagnostics.team_form;
+
+  assert.equal(opinion.forced_pick_market, 'OU_2.5');
+  assert.equal(opinion.forced_pick_selection, 'under');
+  assert.equal(opinion.diagnostics.market_movement.steam_to, 'away');
+  assert.ok(form.home.points_vs_expected_per_match <= -1.5);
+  assert.ok(form.away.points_vs_expected_per_match <= -0.8);
+  assert.ok(form.away.points_vs_expected_per_match > form.home.points_vs_expected_per_match);
+  assert.equal(uncertainty.top_outcome, 'home');
+  assert.equal(uncertainty.draw_share, 0.3);
+  assert.equal(uncertainty.opposite_share, 0.7);
+  assert.ok(uncertainty.deltas.away > uncertainty.deltas.draw);
+});
+
+test('generateCodexOpinion : transfere le top nul Under vers un cote soutenu fortement par le marche', () => {
+  const db = freshDb();
+  const books = ['book-a', 'book-b', 'book-c', 'book-d', 'book-e', 'book-f'];
+  insertH2hOdds(db, [['home', 3.20], ['draw', 2.60], ['away', 3.40]], { takenAt: '2026-06-10T08:00:00Z', bookmakers: books });
+  insertH2hOdds(db, [['home', 2.55], ['draw', 2.75], ['away', 3.50]], { takenAt: '2026-06-11T08:00:00Z', bookmakers: books });
+  insertTotalOdds(db, 2.5, 2.55, 1.55, { bookmakers: Array.from({ length: 12 }, (_, index) => `book-${index}`) });
+
+  const opinion = generateCodexOpinion(db, 1);
+  const uncertainty = opinion.diagnostics.final_ou_h2h_uncertainty;
+
+  assert.equal(opinion.forced_pick_market, 'OU_2.5');
+  assert.equal(opinion.forced_pick_selection, 'under');
+  assert.equal(opinion.diagnostics.market_movement.steam_to, 'home');
+  assert.ok(opinion.diagnostics.market_movement.max_delta >= 0.03);
+  assert.equal(uncertainty.top_outcome, 'draw');
+  assert.equal(uncertainty.top_draw_side, 'home');
+  assert.equal(uncertainty.top_draw_side_share, 1);
+  assert.ok(uncertainty.deltas.home > 0);
+  assert.ok(uncertainty.deltas.draw < 0);
+  assert.equal(uncertainty.deltas.away, 0);
+  assert.equal(opinion.probabilities.draw, 0.3);
 });
 
 test('generateCodexOpinion : redistribue un choix Over vers le scenario oppose plus que vers le nul', () => {
@@ -2231,7 +2285,7 @@ test('generateCodexOpinion : renforce un choix final nul historiquement sous-con
   assert.equal(guard.hit_rate, 1);
   assert.ok(guard.effective_n >= 5);
   assert.ok(guard.confidence_gap >= 0.35);
-  assert.equal(guard.target_draw, 0.58);
+  assert.equal(guard.target_draw, 0.62);
   assert.ok(guard.draw_delta > 0);
   assert.ok(opinion.probabilities.draw > guard.draw_prob);
   assert.match(opinion.summary, /Choix nul confirme/);

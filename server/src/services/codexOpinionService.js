@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v85';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v86';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -2674,8 +2674,8 @@ function forcedDrawConvictionPlan(probs, forced, calibration, live) {
     min_raw_n: 2,
     min_hit_rate: 0.8,
     min_confidence_gap: 0.35,
-    target_draw: 0.58,
-    max_move: 0.065,
+    target_draw: 0.62,
+    max_move: 0.085,
     sample_weight: null,
     hit_rate: null,
     avg_confidence: null,
@@ -2845,7 +2845,7 @@ function finalOuH2hDrawShare(selection, topOutcome = null, topProbability = null
         && homePve <= -1.5
         && awayPve <= -0.8
         && awayPve > homePve;
-      return awayTail ? 0.55 : 0.95;
+      return awayTail ? 0.30 : 0.95;
     }
     if (topOutcome === 'away' && Number(topProbability) < 0.58) return 0.60;
     return 0.85;
@@ -2863,7 +2863,7 @@ function finalOuTopDrawSideShare(forced, topOutcome, marketMovement) {
     && side !== 'draw'
     && Number(marketMovement?.max_delta || 0) >= 0.025
   ) {
-    return { side, side_share: 0.70 };
+    return { side, side_share: Number(marketMovement?.max_delta || 0) >= 0.03 ? 1 : 0.70 };
   }
   return null;
 }
@@ -5554,7 +5554,7 @@ export function generateCodexOpinion(db, matchId) {
   const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, knockoutDrawMemoryAdjustment, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression, homeFavoriteOpenAwayTransfer, centralDrawBandAdjustment, strongFavoriteDrawTail, teamFormContrarianDrawGuard, forcedDrawConviction, forcedScenarioAlignment, finalOuH2hUncertainty, finalOuH2hCalibration);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail55_awaymod60_over_home40_overaway45_topdrawsteam70_top_cap_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail55_awaymod60_over_home40_overaway45_topdrawsteam70_top_cap_line_calibrated`,
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod60_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod60_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated`,
     h2h_books: market?.books || 0,
     prior: prior.context,
     market_movement: marketMovement,
