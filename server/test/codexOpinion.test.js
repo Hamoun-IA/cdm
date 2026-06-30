@@ -81,13 +81,13 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v48');
+  assert.equal(opinion.model_version, 'codex-book-v49');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_compression_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -1273,6 +1273,59 @@ test('generateCodexOpinion : rabote le reliquat outsider des favoris domicile ne
   assert.ok(residual.deltas.draw > 0);
   assert.ok(opinion.probabilities.away < residual.away_prob);
   assert.match(opinion.summary, /Queue outsider domicile/);
+});
+
+test('generateCodexOpinion : transfere l outsider des petits favoris domicile ouverts vers le nul', () => {
+  const db = freshDb();
+  db.prepare('UPDATE matches SET matchday = 2 WHERE id = 1').run();
+  db.prepare("INSERT INTO teams (id, fifa_code, name, group_code) VALUES (3,'TST','Temoin A','A'), (4,'TSB','Temoin B','A')").run();
+  for (const [bookmaker, home, draw, away] of [
+    ['book-a', 2.05, 3.60, 3.80],
+    ['book-b', 2.05, 3.60, 3.80],
+    ['book-c', 2.05, 3.60, 3.80],
+  ]) {
+    for (const [outcome, price] of [['home', home], ['draw', draw], ['away', away]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+  }
+  for (let id = 2; id <= 13; id++) {
+    insertTeamResult(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      home: 3,
+      away: 4,
+      homeScore: id <= 10 ? 1 : 2,
+      awayScore: id <= 10 ? 1 : 1,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-09T00:00:00Z',
+      modelVersion: 'codex-book-v36',
+      probabilities: { home: 0.42, draw: 0.32, away: 0.26 },
+      forcedMarket: '1X2',
+      forcedSelection: 'home',
+    });
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const transfer = opinion.diagnostics.home_favorite_open_away_transfer;
+
+  assert.equal(transfer.available, true);
+  assert.equal(transfer.applied, true);
+  assert.equal(transfer.source_key, 'favorite_confidence:home:open');
+  assert.ok(transfer.effective_n >= 4);
+  assert.ok(transfer.away_bias <= -0.18);
+  assert.ok(transfer.draw_bias >= 0.14);
+  assert.ok(transfer.compression_delta > 0);
+  assert.ok(transfer.deltas.away < 0);
+  assert.ok(transfer.deltas.draw > 0);
+  assert.ok(transfer.draw_share >= 0.68);
+  assert.ok(opinion.probabilities.away < transfer.away_prob);
+  assert.ok(opinion.probabilities.draw > transfer.draw_prob);
+  assert.match(opinion.summary, /Memoire match ouvert domicile/);
 });
 
 test('generateCodexOpinion : calibre les lignes Over Under par ligne standard', () => {

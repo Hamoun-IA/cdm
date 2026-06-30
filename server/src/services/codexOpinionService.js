@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v48';
+const MODEL_VERSION = 'codex-book-v49';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v48' || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -2000,6 +2000,105 @@ function applyHomeFavoriteResidualAwayCompression(probs, plan) {
   return normalize(adjusted);
 }
 
+function homeFavoriteOpenAwayTransferPlan(probs, calibration, hasMarket, live) {
+  const base = {
+    available: !live?.active,
+    applied: false,
+    favorite: null,
+    favorite_prob: probs?.home == null ? null : round(probs.home),
+    draw_prob: probs?.draw == null ? null : round(probs.draw),
+    away_prob: probs?.away == null ? null : round(probs.away),
+    away_bias: null,
+    draw_bias: null,
+    home_bias: null,
+    effective_n: null,
+    source_key: 'favorite_confidence:home:open',
+    max_move: null,
+    memory_multiplier: null,
+    compression_delta: 0,
+    draw_share: null,
+    home_share: null,
+    deltas: { home: 0, draw: 0, away: 0 },
+  };
+  if (live?.active || !validH2h(probs)) return base;
+  const favorite = H2H_OUTCOMES.reduce((acc, o) => probs[o] > probs[acc] ? o : acc, 'home');
+  const favoriteProb = Number(probs[favorite]);
+  const awayProb = Number(probs.away);
+  if (favorite !== 'home' || favoriteProb < 0.36 || favoriteProb >= 0.5 || awayProb < 0.13 || awayProb > 0.32) {
+    return {
+      ...base,
+      favorite,
+      favorite_prob: round(favoriteProb),
+      away_prob: round(awayProb),
+    };
+  }
+
+  const source = calibration?.h2h_regimes?.[base.source_key];
+  const effectiveN = Number(source?.effective_n || 0);
+  const awayBias = Number(source?.bias?.away || 0);
+  const drawBias = Number(source?.bias?.draw || 0);
+  const homeBias = Number(source?.bias?.home || 0);
+  if (effectiveN < 4 || awayBias > -0.18 || drawBias < 0.14 || drawBias < homeBias + 0.08 || !Number(source?.weight || 0)) {
+    return {
+      ...base,
+      available: true,
+      favorite,
+      favorite_prob: round(favoriteProb),
+      draw_prob: round(probs.draw),
+      away_prob: round(awayProb),
+      away_bias: round(awayBias),
+      draw_bias: round(drawBias),
+      home_bias: round(homeBias),
+      effective_n: round(effectiveN, 2),
+    };
+  }
+
+  const maxMove = hasMarket ? 0.055 : 0.042;
+  const memoryMultiplier = hasMarket ? 3.5 : 3;
+  const compressionDelta = clamp(Math.abs(awayBias) * Number(source.weight || 0) * memoryMultiplier, 0, maxMove);
+  const applied = compressionDelta >= 0.003 && awayProb - compressionDelta >= 0.025;
+  const homeUnder = Math.max(0, homeBias);
+  const drawUnder = Math.max(0, drawBias);
+  const underTotal = Math.max(0.001, homeUnder + drawUnder);
+  const drawShare = clamp(drawUnder / underTotal, 0.68, 1);
+  const homeShare = 1 - drawShare;
+  const deltas = { home: 0, draw: 0, away: 0 };
+  if (applied) {
+    deltas.away = round(-compressionDelta);
+    deltas.draw = round(compressionDelta * drawShare);
+    deltas.home = round(compressionDelta * homeShare);
+  }
+
+  return {
+    ...base,
+    available: true,
+    applied,
+    favorite,
+    favorite_prob: round(favoriteProb),
+    draw_prob: round(probs.draw),
+    away_prob: round(awayProb),
+    away_bias: round(awayBias),
+    draw_bias: round(drawBias),
+    home_bias: round(homeBias),
+    effective_n: round(effectiveN, 2),
+    max_move: round(maxMove),
+    memory_multiplier: round(memoryMultiplier),
+    compression_delta: applied ? round(compressionDelta) : 0,
+    draw_share: round(drawShare),
+    home_share: round(homeShare),
+    deltas,
+  };
+}
+
+function applyHomeFavoriteOpenAwayTransfer(probs, plan) {
+  if (!plan?.available || !plan.applied) return probs;
+  const adjusted = {};
+  for (const outcome of H2H_OUTCOMES) {
+    adjusted[outcome] = clamp(probs[outcome] + Number(plan.deltas?.[outcome] || 0), 0.025, 0.94);
+  }
+  return normalize(adjusted);
+}
+
 function applyRestTotalsAdjustment(lines, restPlan) {
   const delta = Number(restPlan?.totals_delta || 0);
   if (!restPlan?.available || Math.abs(delta) < 0.0001) {
@@ -3145,7 +3244,12 @@ function homeFavoriteResidualAwayCompressionSummary(adjustment) {
   return ` Queue outsider domicile : le reliquat exterieur est rabote (-${(Number(adjustment.compression_delta || 0) * 100).toFixed(1)} pt), avec un leger report vers le nul.`;
 }
 
-function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression) {
+function homeFavoriteOpenAwayTransferSummary(adjustment) {
+  if (!adjustment?.available || !adjustment.applied) return '';
+  return ` Memoire match ouvert domicile : l'outsider exterieur est reduit (-${(Number(adjustment.compression_delta || 0) * 100).toFixed(1)} pt), surtout reporte vers le nul.`;
+}
+
+function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression, homeFavoriteOpenAwayTransfer) {
   const ordered = H2H_OUTCOMES.slice().sort((a, b) => h2h[b] - h2h[a]);
   const fav = ordered[0];
   const favName = teamName(match, fav);
@@ -3178,10 +3282,11 @@ function summarize(match, h2h, totals, forced, conf, sources, calibration, teamF
   const drawFavorite = drawFavoriteConvictionSummary(drawFavoriteConviction);
   const homeAwayCompression = homeFavoriteAwayCompressionSummary(homeFavoriteAwayCompression);
   const residualAwayCompression = homeFavoriteResidualAwayCompressionSummary(homeFavoriteResidualAwayCompression);
+  const openHomeAwayTransfer = homeFavoriteOpenAwayTransferSummary(homeFavoriteOpenAwayTransfer);
   const learned = calibrationSummary(calibration, regimeCalibration);
   return {
     headline: `${favName} ${h2h[fav] >= 0.5 ? 'net favori Codex' : 'léger avantage Codex'}`,
-    summary: `${lead}${ou}${liveText}${movement}${totalsMove} ${data}${form}${rest}${knockoutRegulation}${homeDrawGuard}${awayDrawCompression}${koDrawFloor}${strongDrawFloor}${strongAwayFollowThrough}${groupOpeningDraw}${forcedOuDraw}${openDrawGuard}${drawFavorite}${homeAwayCompression}${residualAwayCompression}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
+    summary: `${lead}${ou}${liveText}${movement}${totalsMove} ${data}${form}${rest}${knockoutRegulation}${homeDrawGuard}${awayDrawCompression}${koDrawFloor}${strongDrawFloor}${strongAwayFollowThrough}${groupOpeningDraw}${forcedOuDraw}${openDrawGuard}${drawFavorite}${homeAwayCompression}${residualAwayCompression}${openHomeAwayTransfer}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
   };
 }
 
@@ -3500,6 +3605,8 @@ export function generateCodexOpinion(db, matchId) {
   h2h = applyHomeFavoriteAwayCompression(h2h, homeFavoriteAwayCompression);
   const homeFavoriteResidualAwayCompression = homeFavoriteResidualAwayCompressionPlan(h2h, !!market, live);
   h2h = applyHomeFavoriteResidualAwayCompression(h2h, homeFavoriteResidualAwayCompression);
+  const homeFavoriteOpenAwayTransfer = homeFavoriteOpenAwayTransferPlan(h2h, calibration, !!market, live);
+  h2h = applyHomeFavoriteOpenAwayTransfer(h2h, homeFavoriteOpenAwayTransfer);
   fairOdds = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, impliedOdds(h2h[o])]));
   const forced = bestForcedPick(match, h2h, fairOdds, market, totals, calibration);
   const conf = confidence({ market, totals, intel, scorecard, previous, calibration, teamForm, live, marketMovement });
@@ -3588,6 +3695,7 @@ export function generateCodexOpinion(db, matchId) {
     draw_favorite_conviction: drawFavoriteConviction,
     home_favorite_away_compression: homeFavoriteAwayCompression,
     home_favorite_residual_away_compression: homeFavoriteResidualAwayCompression,
+    home_favorite_open_away_transfer: homeFavoriteOpenAwayTransfer,
     market_movement: marketMovement,
     h2h_market_movement_adjustment: marketMovementAdjustment,
     totals_market_movement: totalsMovement,
@@ -3634,10 +3742,10 @@ export function generateCodexOpinion(db, matchId) {
     live_score_changed: liveScoreChanged,
   };
   const changes = changeSummary(previous, sources);
-  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression);
+  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression, homeFavoriteOpenAwayTransfer);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_compression_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_knockout90_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_compression_line_calibrated`,
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_knockout90_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_line_calibrated`,
     h2h_books: market?.books || 0,
     prior: prior.context,
     market_movement: marketMovement,
@@ -3691,6 +3799,7 @@ export function generateCodexOpinion(db, matchId) {
     draw_favorite_conviction: drawFavoriteConviction,
     home_favorite_away_compression: homeFavoriteAwayCompression,
     home_favorite_residual_away_compression: homeFavoriteResidualAwayCompression,
+    home_favorite_open_away_transfer: homeFavoriteOpenAwayTransfer,
     live_context: live,
   };
 
