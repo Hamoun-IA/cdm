@@ -109,7 +109,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_forced_draw_conviction_team_form_contrarian_draw_forced_scenario_alignment_final_ou_split_34_top_cap_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_forced_draw_conviction_team_form_contrarian_draw_forced_scenario_alignment_final_ou_split_33_top_cap_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -406,9 +406,9 @@ test('generateCodexOpinion : bascule un favori exterieur J1 moyen vers Under 2.5
   assert.equal(uncertainty.final_market, 'OU_2.5');
   assert.equal(uncertainty.favorite, 'away');
   assert.equal(uncertainty.top_outcome, 'away');
-  assert.equal(uncertainty.target_top_probability, 0.34);
-  assert.equal(uncertainty.draw_share, 0.7);
-  assert.equal(uncertainty.opposite_share, 0.3);
+  assert.equal(uncertainty.target_top_probability, 0.33);
+  assert.equal(uncertainty.draw_share, 0.75);
+  assert.equal(uncertainty.opposite_share, 0.25);
   assert.ok(uncertainty.transfer_delta > 0);
   assert.ok(uncertainty.deltas.draw > uncertainty.deltas.home);
   assert.ok(opinion.probabilities.away <= 0.35);
@@ -432,8 +432,8 @@ test('generateCodexOpinion : redistribue un choix Over vers le scenario oppose p
   assert.equal(uncertainty.available, true);
   assert.equal(uncertainty.applied, true);
   assert.equal(uncertainty.top_outcome, 'home');
-  assert.equal(uncertainty.draw_share, 0.2);
-  assert.equal(uncertainty.opposite_share, 0.8);
+  assert.equal(uncertainty.draw_share, 0.1);
+  assert.equal(uncertainty.opposite_share, 0.9);
   assert.ok(uncertainty.deltas.away > uncertainty.deltas.draw);
   assert.ok(opinion.probabilities.home <= 0.35);
 });
@@ -1942,7 +1942,7 @@ test('generateCodexOpinion : applique une calibration par régime quand le biais
 
   assert.equal(opinion.diagnostics.regime_calibration.key, 'favorite_confidence:home:open');
   assert.ok(opinion.diagnostics.regime_calibration.deltas.draw > 0);
-  assert.ok(opinion.probabilities.draw > 0.33);
+  assert.ok(opinion.probabilities.draw >= 0.33);
   assert.match(opinion.summary, /Calibration par régime active/);
 });
 
@@ -2040,7 +2040,7 @@ test('generateCodexOpinion : renforce le nul des matchs ouverts quand le replay 
   assert.equal(finalOu.available, true);
   assert.equal(finalOu.applied, true);
   assert.equal(finalOu.top_outcome, 'draw');
-  assert.equal(finalOu.target_top_probability, 0.34);
+  assert.equal(finalOu.target_top_probability, 0.33);
   assert.ok(finalOu.deltas.draw < 0);
   assert.ok(opinion.probabilities.draw >= finalOu.target_top_probability);
   assert.match(opinion.summary, /Match ouvert/);
