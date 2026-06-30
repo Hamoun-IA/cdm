@@ -16,7 +16,7 @@ export const TREE = {
   headH: 42,
 };
 
-export const BRACKET_TOPOLOGY_VERSION = 'dependency-v13';
+export const BRACKET_TOPOLOGY_VERSION = 'dependency-v14';
 
 const OFFICIAL_R16_ENTRANTS = new Map([
   [89, [74, 77]],
@@ -27,6 +27,17 @@ const OFFICIAL_R16_ENTRANTS = new Map([
   [94, [81, 82]],
   [95, [86, 88]],
   [96, [85, 87]],
+]);
+
+const OFFICIAL_WINNER_ENTRANTS = new Map([
+  ...OFFICIAL_R16_ENTRANTS,
+  [97, [89, 90]],
+  [98, [93, 94]],
+  [99, [91, 92]],
+  [100, [95, 96]],
+  [101, [97, 98]],
+  [102, [99, 100]],
+  [104, [101, 102]],
 ]);
 
 const OFFICIAL_R16_ORDER = [...OFFICIAL_R16_ENTRANTS.keys()];
@@ -70,10 +81,17 @@ export function buildTree(rounds, third) {
   const nodeMeta = new Map();
   const added = new Set();
 
-  const refsOf = (match, prefix = 'W') => ['home_placeholder', 'away_placeholder']
-    .map((key) => String(match?.[key] || '').match(new RegExp(`^${prefix}(\\d+)$`))?.[1])
-    .filter(Boolean)
-    .map(Number);
+  const refsOf = (match, prefix = 'W') => {
+    const actualRefs = ['home_placeholder', 'away_placeholder']
+      .map((key) => String(match?.[key] || '').match(new RegExp(`^${prefix}(\\d+)$`))?.[1])
+      .filter(Boolean)
+      .map(Number);
+    if (prefix !== 'W') return actualRefs;
+
+    const officialRefs = OFFICIAL_WINNER_ENTRANTS.get(Number(match?.fifa_match_number));
+    const availableOfficialRefs = officialRefs?.filter((matchNo) => byNumber.has(matchNo)) || [];
+    return availableOfficialRefs.length ? availableOfficialRefs : actualRefs;
+  };
   const avg = (values) => values.reduce((sum, value) => sum + value, 0) / values.length;
 
   const addNode = (matchNo, col, center, className = '') => {

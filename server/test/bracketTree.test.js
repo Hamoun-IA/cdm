@@ -136,3 +136,20 @@ test('buildTree : garde les paires officielles meme avec une branche partielle',
   assertCenteredOnEntrants(tree, 89, 74, 77);
   assert.equal(tree.lines.some((line) => line.key.startsWith('73-89-')), false);
 });
+
+test('buildTree : utilise les dependances FIFA meme si les placeholders API derivent', () => {
+  const fixture = worldCupKnockoutFixture();
+  fixture.R16 = fixture.R16.map((match) => (
+    Number(match.fifa_match_number) === 89
+      ? m(89, 'R16', 'W73', 'W74')
+      : match
+  ));
+
+  const tree = buildTree(fixture, m(103, 'THIRD', 'L101', 'L102'));
+  const leftR32 = orderedMatchNosInColumn(tree, 0);
+
+  assert.deepEqual(leftR32.slice(0, 2), [74, 77]);
+  assertCenteredOnEntrants(tree, 89, 74, 77);
+  assert.equal(tree.lines.some((line) => line.key.startsWith('73-89-')), false);
+  assert.notEqual(centerY(matchNode(tree, 89)), (centerY(matchNode(tree, 73)) + centerY(matchNode(tree, 74))) / 2);
+});
