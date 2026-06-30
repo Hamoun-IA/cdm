@@ -16,6 +16,8 @@ export const TREE = {
   headH: 42,
 };
 
+export const BRACKET_TOPOLOGY_VERSION = 'dependency-v2';
+
 export function buildTree(rounds, third) {
   const { nodeW, nodeH, gapX, gapY, headH } = TREE;
   const stepY = nodeH + gapY;
@@ -140,6 +142,7 @@ export function buildTree(rounds, third) {
   ];
 
   return {
+    topology: BRACKET_TOPOLOGY_VERSION,
     labels,
     lines,
     nodes,

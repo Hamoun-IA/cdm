@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTree, TREE } from '../../web/src/views/bracketTree.js';
+import { BRACKET_TOPOLOGY_VERSION, buildTree, TREE } from '../../web/src/views/bracketTree.js';
 
 const m = (num, stage, home = null, away = null) => ({
   id: num,
@@ -57,6 +57,7 @@ function orderedMatchNosInColumn(tree, x) {
 
 test('buildTree : aligne les 8es sur leurs vrais vainqueurs entrants', () => {
   const tree = buildTree(worldCupKnockoutFixture(), m(103, 'THIRD', 'L101', 'L102'));
+  assert.equal(tree.topology, BRACKET_TOPOLOGY_VERSION);
   const leftR32 = orderedMatchNosInColumn(tree, 0);
   const rightR32 = orderedMatchNosInColumn(tree, (TREE.nodeW + TREE.gapX) * 8);
 

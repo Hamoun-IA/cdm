@@ -80,7 +80,7 @@ export default function Bracket() {
         </div>
       </div>
       <div className="bracket-scroll">
-        <div className="bracket-tree" style={{ width: tree.width, height: tree.height }}>
+        <div className="bracket-tree" data-topology={tree.topology} style={{ width: tree.width, height: tree.height }}>
           {tree.labels.map((label) => (
             <div
               className="bracket-col-label"
