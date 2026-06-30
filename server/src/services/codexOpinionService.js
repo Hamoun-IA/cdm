@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v24';
+const MODEL_VERSION = 'codex-book-v25';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -118,6 +118,12 @@ function forcedExactMarket(market) {
 
 function forcedExactPick(market, selection) {
   return `${forcedExactMarket(market)}:${String(selection || 'unknown')}`;
+}
+
+function isStandardForcedMarket(market) {
+  if (market === '1X2') return true;
+  const m = String(market || '').match(/^OU_(\d+(?:\.\d+)?)$/);
+  return !!(m && isStandardTotalsLine(Number(m[1])));
 }
 
 function latestPrematchCodexOpinions(db, excludedMatchId, cutoffUtc = null) {
@@ -372,7 +378,7 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
         if (forcedActual) forcedVerdict = row.forced_pick_selection === forcedActual ? 'hit' : 'miss';
       }
     }
-    if (forcedVerdict) {
+    if (forcedVerdict && isStandardForcedMarket(row.forced_pick_market)) {
       const bucketKey = forcedMarketBucket(row.forced_pick_market);
       forcedN += 1;
       forcedEffectiveN += rowWeight;

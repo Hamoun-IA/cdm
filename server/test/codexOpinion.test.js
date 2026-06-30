@@ -81,7 +81,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v24');
+  assert.equal(opinion.model_version, 'codex-book-v25');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -641,7 +641,7 @@ test('generateCodexOpinion : favorise le 1X2 quand les O/U forcés sous-performe
       modelVersion: 'codex-book-v19',
       probabilities: { home: 0.58, draw: 0.26, away: 0.16 },
       totals: [],
-      forcedMarket: 'OU_3',
+      forcedMarket: 'OU_2.5',
       forcedSelection: 'over',
     });
   }
@@ -1051,6 +1051,60 @@ test('generateCodexOpinion : applique le mouvement marche 1X2 dans la bonne dire
   assert.ok(opinion.diagnostics.h2h_market_movement_adjustment.deltas.away > 0);
   assert.ok(opinion.diagnostics.h2h_market_movement_adjustment.deltas.home < 0);
   assert.match(opinion.summary, /Afrique du Sud/);
+});
+
+test('generateCodexOpinion : ignore les anciens choix forces Over Under non standards dans la calibration', () => {
+  const db = freshDb();
+  insertFinishedMatch(db, { id: 2, kickoff: '2026-06-10T02:00:00Z', homeScore: 1, awayScore: 0 });
+  insertHistoricalOpinion(db, {
+    matchId: 2,
+    generatedAt: '2026-06-10T00:00:00Z',
+    modelVersion: 'codex-book-v19',
+    probabilities: { home: 0.58, draw: 0.26, away: 0.16 },
+    totals: [],
+    forcedMarket: '1X2',
+    forcedSelection: 'home',
+  });
+  insertFinishedMatch(db, { id: 3, kickoff: '2026-06-10T03:00:00Z', homeScore: 1, awayScore: 0 });
+  insertHistoricalOpinion(db, {
+    matchId: 3,
+    generatedAt: '2026-06-10T00:00:00Z',
+    modelVersion: 'codex-book-v19',
+    probabilities: { home: 0.58, draw: 0.26, away: 0.16 },
+    totals: [],
+    forcedMarket: 'OU_2',
+    forcedSelection: 'over',
+  });
+  insertFinishedMatch(db, { id: 4, kickoff: '2026-06-10T04:00:00Z', homeScore: 1, awayScore: 0 });
+  insertHistoricalOpinion(db, {
+    matchId: 4,
+    generatedAt: '2026-06-10T00:00:00Z',
+    modelVersion: 'codex-book-v19',
+    probabilities: { home: 0.58, draw: 0.26, away: 0.16 },
+    totals: [],
+    forcedMarket: 'OU_2.25',
+    forcedSelection: 'over',
+  });
+  insertFinishedMatch(db, { id: 5, kickoff: '2026-06-10T05:00:00Z', homeScore: 3, awayScore: 0 });
+  insertHistoricalOpinion(db, {
+    matchId: 5,
+    generatedAt: '2026-06-10T00:00:00Z',
+    modelVersion: 'codex-book-v19',
+    probabilities: { home: 0.58, draw: 0.26, away: 0.16 },
+    totals: [],
+    forcedMarket: 'OU_2.5',
+    forcedSelection: 'over',
+  });
+
+  const opinion = generateCodexOpinion(db, 1);
+  const forced = opinion.diagnostics.calibration.forced;
+
+  assert.equal(forced.n, 2);
+  assert.equal(forced.by_market['1X2'].n, 1);
+  assert.equal(forced.by_market.OU.n, 1);
+  assert.equal(forced.by_exact_market['OU_2.5'].n, 1);
+  assert.equal(forced.by_exact_market.OU_2, undefined);
+  assert.equal(forced.by_exact_market['OU_2.25'], undefined);
 });
 
 function insertFinishedMatch(db, { id, kickoff, homeScore, awayScore }) {
