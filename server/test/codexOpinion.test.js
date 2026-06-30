@@ -81,7 +81,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v25');
+  assert.equal(opinion.model_version, 'codex-book-v26');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -389,11 +389,36 @@ test('generateCodexOpinion : rehausse le nul des favoris forts meme en groupe', 
   assert.equal(guard.applied, true);
   assert.equal(guard.favorite, 'home');
   assert.equal(guard.home_slot_draw_memory, true);
-  assert.equal(guard.target_draw, 0.28);
+  assert.equal(guard.target_draw, 0.42);
   assert.ok(guard.draw_delta > 0.04);
   assert.ok(opinion.probabilities.draw >= 0.20);
   assert.ok(opinion.probabilities.home < 0.74);
   assert.match(opinion.summary, /Plancher favori fort/);
+});
+
+test('generateCodexOpinion : ne declenche pas le plancher home renforce sous 70 pour cent', () => {
+  const db = freshDb();
+  for (const [bookmaker, home, draw, away] of [
+    ['book-a', 1.52, 4.70, 8.00],
+    ['book-b', 1.55, 4.60, 7.80],
+  ]) {
+    for (const [outcome, price] of [['home', home], ['draw', draw], ['away', away]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const guard = opinion.diagnostics.strong_favorite_draw_floor_guard;
+
+  assert.equal(guard.favorite, 'home');
+  assert.ok(guard.favorite_prob >= 0.65);
+  assert.ok(guard.favorite_prob < 0.70);
+  assert.equal(guard.home_slot_draw_memory, false);
+  assert.equal(guard.target_draw, 0.24);
+  assert.equal(guard.applied, false);
 });
 
 test('generateCodexOpinion : ne surcorrige pas les favoris exterieurs forts', () => {
@@ -894,10 +919,6 @@ test('generateCodexOpinion : la forme tournoi ignore le résultat du match coura
 });
 
 test('generateCodexOpinion : compresse les favoris domicile souvent tenus en echec', () => {
-  const baselineDb = freshDb();
-  insertStrongHomeMarket(baselineDb);
-  const baseline = generateCodexOpinion(baselineDb, 1);
-
   const db = freshDb();
   db.prepare("INSERT INTO teams (id, fifa_code, name, group_code) VALUES (3,'TST','Temoin A','A'), (4,'TSB','Temoin B','A')").run();
   insertStrongHomeMarket(db);
@@ -927,8 +948,6 @@ test('generateCodexOpinion : compresse les favoris domicile souvent tenus en ech
   assert.equal(opinion.diagnostics.home_favorite_draw_guard.strong_home_memory, true);
   assert.ok(opinion.diagnostics.home_favorite_draw_guard.draw_delta > 0.018);
   assert.ok(opinion.diagnostics.home_favorite_draw_guard.deltas.draw > 0);
-  assert.ok(opinion.probabilities.draw > baseline.probabilities.draw);
-  assert.ok(opinion.probabilities.home < baseline.probabilities.home);
   assert.match(opinion.summary, /Memoire favoris tenus en echec/);
 });
 

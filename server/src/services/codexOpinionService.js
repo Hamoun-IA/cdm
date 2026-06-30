@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v25';
+const MODEL_VERSION = 'codex-book-v26';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -1263,22 +1263,22 @@ function strongFavoriteDrawFloorGuardPlan(match, probs, hasMarket, live) {
   const favoriteProb = Number(probs[favorite]);
   const drawProb = Number(probs.draw);
   const homeSlotDrawMemory = favorite === 'home' && favoriteProb >= 0.70;
-  if (favorite === 'draw' || favoriteProb < 0.70 || drawProb >= 0.24) {
+  const targetDraw = homeSlotDrawMemory ? 0.42 : 0.24;
+  if (favorite === 'draw' || favoriteProb < 0.70 || drawProb >= targetDraw) {
     return {
       ...base,
       favorite,
       favorite_prob: round(favoriteProb),
-      target_draw: homeSlotDrawMemory ? 0.28 : 0.24,
+      target_draw: targetDraw,
       home_slot_draw_memory: homeSlotDrawMemory,
     };
   }
 
-  const targetDraw = homeSlotDrawMemory ? 0.28 : 0.24;
   const shortfall = Math.max(0, targetDraw - drawProb);
   const maxMove = homeSlotDrawMemory
-    ? (hasMarket ? 0.048 : 0.032)
+    ? (hasMarket ? 0.13 : 0.085)
     : (hasMarket ? 0.024 : 0.016);
-  const factor = homeSlotDrawMemory ? 0.60 : 0.72;
+  const factor = homeSlotDrawMemory ? 1.00 : 0.72;
   const drawDelta = clamp(shortfall * factor, 0, maxMove);
   const applied = drawDelta >= 0.003;
   const other = favorite === 'home' ? 'away' : 'home';
