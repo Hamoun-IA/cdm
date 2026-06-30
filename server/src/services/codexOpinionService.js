@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v64';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v65';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -303,15 +303,20 @@ function finalizedTotalsLineBuckets(buckets) {
 }
 
 function emptyForcedBucket() {
-  return { n: 0, hits: 0, effective_n: 0, hit_weight: 0 };
+  return { n: 0, hits: 0, effective_n: 0, hit_weight: 0, confidence: 0, confidence_weight: 0 };
 }
 
-function addForcedSample(buckets, key, verdict, rowWeight) {
+function addForcedSample(buckets, key, verdict, rowWeight, confidenceScore = null) {
   const bucket = buckets instanceof Map
     ? buckets.get(key) || emptyForcedBucket()
     : buckets[key] || emptyForcedBucket();
   bucket.n += 1;
   bucket.effective_n += rowWeight;
+  const confidence = confidenceScore == null ? NaN : Number(confidenceScore);
+  if (Number.isFinite(confidence)) {
+    bucket.confidence += confidence * rowWeight;
+    bucket.confidence_weight += rowWeight;
+  }
   if (verdict === 'hit') {
     bucket.hits += 1;
     bucket.hit_weight += rowWeight;
@@ -328,6 +333,11 @@ function finalizedForcedBuckets(buckets) {
       n: bucket.n,
       effective_n: round(bucket.effective_n, 2),
       hit_rate: bucket.effective_n ? round(bucket.hit_weight / bucket.effective_n) : null,
+      avg_confidence: bucket.confidence_weight ? round(bucket.confidence / bucket.confidence_weight) : null,
+      confidence_gap: forcedConfidenceGap(
+        bucket.effective_n ? round(bucket.hit_weight / bucket.effective_n) : null,
+        bucket.confidence_weight ? round(bucket.confidence / bucket.confidence_weight) : null
+      ),
     },
   ]));
 }
@@ -409,6 +419,12 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
   };
   const forcedExactMarketBuckets = new Map();
   const forcedExactPickBuckets = new Map();
+  const finalForcedBuckets = {
+    '1X2': emptyForcedBucket(),
+    OU: emptyForcedBucket(),
+  };
+  const finalForcedExactMarketBuckets = new Map();
+  const finalForcedExactPickBuckets = new Map();
   let totalsN = 0;
   let totalsEffectiveN = 0;
   let totalsPredOver = 0;
@@ -463,9 +479,9 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
         forcedConfidence += confidenceScore * rowWeight;
         forcedConfidenceWeight += rowWeight;
       }
-      addForcedSample(forcedBuckets, bucketKey, forcedVerdict, rowWeight);
-      addForcedSample(forcedExactMarketBuckets, forcedExactMarket(calibrationPick.market), forcedVerdict, rowWeight);
-      addForcedSample(forcedExactPickBuckets, forcedExactPick(calibrationPick.market, calibrationPick.selection), forcedVerdict, rowWeight);
+      addForcedSample(forcedBuckets, bucketKey, forcedVerdict, rowWeight, confidenceScore);
+      addForcedSample(forcedExactMarketBuckets, forcedExactMarket(calibrationPick.market), forcedVerdict, rowWeight, confidenceScore);
+      addForcedSample(forcedExactPickBuckets, forcedExactPick(calibrationPick.market, calibrationPick.selection), forcedVerdict, rowWeight, confidenceScore);
       if (forcedVerdict === 'hit') {
         forcedHits += 1;
         forcedHitWeight += rowWeight;
@@ -478,6 +494,7 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
     };
     const finalForcedVerdict = forcedVerdictForPick(row, finalPick);
     if (finalForcedVerdict && isStandardForcedMarket(finalPick.market)) {
+      const bucketKey = forcedMarketBucket(finalPick.market);
       finalForcedN += 1;
       finalForcedEffectiveN += rowWeight;
       const confidenceScore = Number(row.confidence_score);
@@ -485,6 +502,9 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
         finalForcedConfidence += confidenceScore * rowWeight;
         finalForcedConfidenceWeight += rowWeight;
       }
+      addForcedSample(finalForcedBuckets, bucketKey, finalForcedVerdict, rowWeight, confidenceScore);
+      addForcedSample(finalForcedExactMarketBuckets, forcedExactMarket(finalPick.market), finalForcedVerdict, rowWeight, confidenceScore);
+      addForcedSample(finalForcedExactPickBuckets, forcedExactPick(finalPick.market, finalPick.selection), finalForcedVerdict, rowWeight, confidenceScore);
       if (finalForcedVerdict === 'hit') {
         finalForcedHits += 1;
         finalForcedHitWeight += rowWeight;
@@ -523,6 +543,9 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
   const forcedByMarket = finalizedForcedBuckets(forcedBuckets);
   const forcedByExactMarket = finalizedForcedBuckets(forcedExactMarketBuckets);
   const forcedByExactPick = finalizedForcedBuckets(forcedExactPickBuckets);
+  const finalForcedByMarket = finalizedForcedBuckets(finalForcedBuckets);
+  const finalForcedByExactMarket = finalizedForcedBuckets(finalForcedExactMarketBuckets);
+  const finalForcedByExactPick = finalizedForcedBuckets(finalForcedExactPickBuckets);
   const forcedHitRate = forcedEffectiveN ? round(forcedHitWeight / forcedEffectiveN) : null;
   const forcedAvgConfidence = forcedConfidenceWeight ? round(forcedConfidence / forcedConfidenceWeight) : null;
   const finalForcedHitRate = finalForcedEffectiveN ? round(finalForcedHitWeight / finalForcedEffectiveN) : null;
@@ -565,6 +588,9 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
       final_raw_hit_rate: finalForcedN ? round(finalForcedHits / finalForcedN) : null,
       final_avg_confidence: finalForcedAvgConfidence,
       final_confidence_gap: forcedConfidenceGap(finalForcedHitRate, finalForcedAvgConfidence),
+      final_by_market: finalForcedByMarket,
+      final_by_exact_market: finalForcedByExactMarket,
+      final_by_exact_pick: finalForcedByExactPick,
       by_market: forcedByMarket,
       by_exact_market: forcedByExactMarket,
       by_exact_pick: forcedByExactPick,
@@ -3780,6 +3806,61 @@ function confidenceDetails({ match, market, totals, intel, scorecard, previous, 
       });
     }
   }
+  const forcedMarket = String(forced?.market || '');
+  const forcedIsOu = forcedMarket.startsWith('OU_');
+  if (forcedIsOu && !live?.active) {
+    const finalBuckets = [
+      {
+        scope: 'selection',
+        key: forcedExactPick(forcedMarket, forced.selection),
+        stats: calibration?.forced?.final_by_exact_pick?.[forcedExactPick(forcedMarket, forced.selection)],
+        min_effective_n: 5,
+      },
+      {
+        scope: 'market',
+        key: forcedExactMarket(forcedMarket),
+        stats: calibration?.forced?.final_by_exact_market?.[forcedExactMarket(forcedMarket)],
+        min_effective_n: 6,
+      },
+      {
+        scope: 'class',
+        key: forcedMarketBucket(forcedMarket),
+        stats: calibration?.forced?.final_by_market?.[forcedMarketBucket(forcedMarket)],
+        min_effective_n: 8,
+      },
+    ];
+    const bucket = finalBuckets.find((item) => (
+      item.stats?.effective_n >= item.min_effective_n &&
+      item.stats.hit_rate != null &&
+      item.stats.confidence_gap != null
+    ));
+    const hitRate = Number(bucket?.stats?.hit_rate);
+    const confidenceGap = Number(bucket?.stats?.confidence_gap);
+    if (bucket && Number.isFinite(hitRate) && Number.isFinite(confidenceGap)) {
+      const sampleWeight = Number(bucket.stats.effective_n) / (Number(bucket.stats.effective_n) + 10);
+      if (hitRate >= 0.8 && confidenceGap >= 0.16) {
+        const bonus = Math.round(clamp((confidenceGap - 0.10) * 9 * sampleWeight, 1, 3));
+        adjust('forced_final_bucket_underconfidence', bonus, {
+          scope: bucket.scope,
+          bucket_key: bucket.key,
+          hit_rate: round(hitRate),
+          avg_confidence: bucket.stats.avg_confidence,
+          confidence_gap: round(confidenceGap),
+          effective_n: bucket.stats.effective_n,
+        });
+      } else if (confidenceGap <= -0.16) {
+        const penalty = -Math.round(clamp((Math.abs(confidenceGap) - 0.10) * 9 * sampleWeight, 1, 3));
+        adjust('forced_final_bucket_overconfidence', penalty, {
+          scope: bucket.scope,
+          bucket_key: bucket.key,
+          hit_rate: round(hitRate),
+          avg_confidence: bucket.stats.avg_confidence,
+          confidence_gap: round(confidenceGap),
+          effective_n: bucket.stats.effective_n,
+        });
+      }
+    }
+  }
   if (teamForm?.available) c += teamForm.home.played && teamForm.away.played ? 3 : 1;
   else if (match?.stage === 'GROUP' && Number(match?.matchday) === 1 && !live?.active) {
     adjust('opening_group_no_team_form', -5, { stage: match.stage, matchday: match.matchday });
@@ -3849,8 +3930,6 @@ function confidenceDetails({ match, market, totals, intel, scorecard, previous, 
     }
   }
 
-  const forcedMarket = String(forced?.market || '');
-  const forcedIsOu = forcedMarket.startsWith('OU_');
   let forcedMarketClassGap = null;
   if (forcedIsOu && !live?.active) {
     const byMarket = calibration?.forced?.by_market || {};
@@ -4711,6 +4790,9 @@ export function generateCodexOpinion(db, matchId) {
         final_hit_rate: calibration.forced.final_hit_rate,
         final_avg_confidence: calibration.forced.final_avg_confidence,
         final_confidence_gap: calibration.forced.final_confidence_gap,
+        final_by_market: calibration.forced.final_by_market,
+        final_by_exact_market: calibration.forced.final_by_exact_market,
+        final_by_exact_pick: calibration.forced.final_by_exact_pick,
         by_market: calibration.forced.by_market,
         by_exact_market: calibration.forced.by_exact_market,
         by_exact_pick: calibration.forced.by_exact_pick,

@@ -299,6 +299,40 @@ test('generateCodexOpinion : conserve le poids plein des avis recents apres bump
   assert.equal(opinion.diagnostics.calibration.h2h.effective_n, 1);
 });
 
+test('generateCodexOpinion : calibre la confiance du choix final O/U par bucket exact', () => {
+  const db = freshDb();
+  for (let id = 2; id <= 10; id += 1) {
+    insertFinishedMatch(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      homeScore: 1,
+      awayScore: 0,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-10T00:00:00Z',
+      modelVersion: 'codex-book-v64',
+      probabilities: { home: 0.34, draw: 0.34, away: 0.32 },
+      totals: [{ line: 2.5, probs: { over: 0.38, under: 0.62 }, fair_odds: { over: 2.63, under: 1.61 }, synthetic: false }],
+      forcedMarket: 'OU_2.5',
+      forcedSelection: 'under',
+      confidenceScore: 45,
+    });
+  }
+  insertH2hOdds(db, [['home', 2.80], ['draw', 3.00], ['away', 2.80]]);
+  insertTotalOdds(db, 2.5, 2.35, 1.65, { bookmakers: Array.from({ length: 10 }, (_, index) => `book-${index}`) });
+
+  const opinion = generateCodexOpinion(db, 1);
+  const confidenceContext = opinion.diagnostics.confidence_context;
+  const adjustment = confidenceContext.adjustments.find((item) => item.key === 'forced_final_bucket_underconfidence');
+
+  assert.equal(opinion.forced_pick_market, 'OU_2.5');
+  assert.equal(opinion.forced_pick_selection, 'under');
+  assert.ok(adjustment);
+  assert.equal(adjustment.bucket_key, 'OU_2.5:under');
+  assert.ok(opinion.diagnostics.calibration.forced.final_by_exact_pick['OU_2.5:under'].confidence_gap > 0.5);
+});
+
 test('generateCodexOpinion : force le nul J2 entre deux vainqueurs avec favori domicile tres bas cote', () => {
   const db = freshDb();
   db.prepare("UPDATE matches SET matchday = 2, kickoff_utc = '2026-06-15T19:00:00Z' WHERE id = 1").run();
