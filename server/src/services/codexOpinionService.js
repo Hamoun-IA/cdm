@@ -5,7 +5,8 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v49';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v49';
+const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -3294,6 +3295,16 @@ export function latestCodexOpinion(db, matchId) {
   return decode(db.prepare(`
     SELECT * FROM codex_opinions WHERE match_id = ? ORDER BY generated_at DESC, id DESC LIMIT 1
   `).get(matchId));
+}
+
+export function codexOpinionMeta(opinion) {
+  const opinionVersion = opinion?.model_version || null;
+  return {
+    current_model_version: MODEL_VERSION,
+    opinion_model_version: opinionVersion,
+    is_model_current: !!opinionVersion && opinionVersion === MODEL_VERSION,
+    needs_recalculation: !opinionVersion || opinionVersion !== MODEL_VERSION,
+  };
 }
 
 function actualScoreLabel(match) {

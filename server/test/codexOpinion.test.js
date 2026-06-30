@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openAt } from '../src/db.js';
-import { codexOpinionHistory, generateCodexOpinion, latestCodexOpinion, listCodexOpinions } from '../src/services/codexOpinionService.js';
+import { CURRENT_CODEX_MODEL_VERSION, codexOpinionHistory, codexOpinionMeta, generateCodexOpinion, latestCodexOpinion, listCodexOpinions } from '../src/services/codexOpinionService.js';
 import { createScorecard } from '../src/services/scorecardService.js';
 import { createIntel } from '../src/services/intelService.js';
 
@@ -91,6 +91,27 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
+});
+
+test('codexOpinionMeta : signale un avis produit avec un ancien modèle', () => {
+  assert.deepEqual(codexOpinionMeta(null), {
+    current_model_version: CURRENT_CODEX_MODEL_VERSION,
+    opinion_model_version: null,
+    is_model_current: false,
+    needs_recalculation: true,
+  });
+  assert.deepEqual(codexOpinionMeta({ model_version: CURRENT_CODEX_MODEL_VERSION }), {
+    current_model_version: CURRENT_CODEX_MODEL_VERSION,
+    opinion_model_version: CURRENT_CODEX_MODEL_VERSION,
+    is_model_current: true,
+    needs_recalculation: false,
+  });
+  assert.deepEqual(codexOpinionMeta({ model_version: 'codex-book-v48' }), {
+    current_model_version: CURRENT_CODEX_MODEL_VERSION,
+    opinion_model_version: 'codex-book-v48',
+    is_model_current: false,
+    needs_recalculation: true,
+  });
 });
 
 test('generateCodexOpinion : rehausse prudemment le nul des premiers matchs de groupe', () => {

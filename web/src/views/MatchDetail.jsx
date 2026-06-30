@@ -173,10 +173,11 @@ function pct0(x) {
   return x == null ? '—' : `${Math.round(Number(x) * 100)} %`;
 }
 
-function CodexOpinion({ opinion, match }) {
+function CodexOpinion({ opinion, match, meta }) {
   if (!opinion) return null;
   const probs = opinion.probabilities || {};
   const fair = opinion.fair_odds || {};
+  const staleModel = !!(meta?.needs_recalculation && meta?.opinion_model_version);
   const h2h = [
     ['home', match.home_display],
     ['draw', 'Nul'],
@@ -188,6 +189,7 @@ function CodexOpinion({ opinion, match }) {
         <div>
           <div className="codex-kicker">Avis Codex</div>
           <h3>{opinion.headline}</h3>
+          {staleModel ? <span className="codex-version-badge">modèle à recalculer</span> : null}
         </div>
         <div className="confidence-chip codex-confidence">
           <span className="num">{opinion.confidence_score}</span>
@@ -223,7 +225,10 @@ function CodexOpinion({ opinion, match }) {
         </div>
         <div className="codex-meta">
           <span>{opinion.change_summary}</span>
-          <span>{opinion.generated_at?.slice(0, 16).replace('T', ' ')} UTC · {opinion.model_version}</span>
+          <span>
+            {opinion.generated_at?.slice(0, 16).replace('T', ' ')} UTC · {opinion.model_version}
+            {staleModel ? ` · courant ${meta.current_model_version}` : ''}
+          </span>
         </div>
       </div>
     </div>
@@ -664,6 +669,8 @@ export default function MatchDetail({ id }) {
   if (!data?.match) return <div className="errbox">Match introuvable.</div>;
   const m = data.match;
   const live = ['IN_PLAY', 'PAUSED'].includes(m.status);
+  const codexMeta = data.codex_opinion_meta || {};
+  const staleCodexOpinion = !!(codexMeta.needs_recalculation && data.codex_opinion);
 
   // historique de la cote du meilleur book par outcome (pour la sparkline)
   const histByOutcome = {};
@@ -692,7 +699,7 @@ export default function MatchDetail({ id }) {
 
       <MatchOpinion opinion={data.opinion} />
 
-      <CodexOpinion opinion={data.codex_opinion} match={m} />
+      <CodexOpinion opinion={data.codex_opinion} match={m} meta={codexMeta} />
 
       <CodexCombo
         combo={data.codex_combo}
@@ -711,8 +718,11 @@ export default function MatchDetail({ id }) {
           {analyzing === 'pending' ? '🔭 Analyse en cours…' : '🔭 Analyser maintenant'}
         </button>
         <button className="ghost" disabled={codexing === 'pending'} onClick={requestCodexOpinion}>
-          {codexing === 'pending' ? 'Avis Codex…' : 'Avis Codex'}
+          {codexing === 'pending' ? 'Avis Codex…' : staleCodexOpinion ? 'Recalculer Avis Codex' : 'Avis Codex'}
         </button>
+        {staleCodexOpinion && (
+          <span className="small muted">dernier avis {codexMeta.opinion_model_version}, modèle courant {codexMeta.current_model_version}</span>
+        )}
         {analyzing === 'pending' && <span className="small muted">le Scout enquête, la fiche apparaîtra ici (~2 min)</span>}
         {analyzing && analyzing !== 'pending' && <span className="small" style={{ color: 'var(--brick)' }}>{analyzing}</span>}
         {codexing && codexing !== 'pending' && <span className="small" style={{ color: 'var(--brick)' }}>{codexing}</span>}

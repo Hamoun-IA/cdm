@@ -24,7 +24,7 @@ import { prepareMatch } from '../services/prepareService.js';
 import { matchdayMorning } from '../services/matchdayMorningService.js';
 import { buildMatchOpinion } from '../services/matchOpinionService.js';
 import { codexComboForMatch } from '../services/codexComboService.js';
-import { codexOpinionHistory, generateCodexOpinion, latestCodexOpinion } from '../services/codexOpinionService.js';
+import { codexOpinionHistory, codexOpinionMeta, generateCodexOpinion, latestCodexOpinion } from '../services/codexOpinionService.js';
 import { liveAnalysisDashboard, reviseLiveOpinion } from '../services/liveAnalysisService.js';
 
 const MATCH_SELECT = `
@@ -148,6 +148,7 @@ export function apiRouter(db, { notify = null } = {}) {
     `).all(row.id);
     const stats = db.prepare('SELECT * FROM match_stats WHERE match_id = ?').all(row.id);
     const match = decorateMatch(db, row);
+    const codex_opinion = latestCodexOpinion(db, row.id);
     res.json({
       match, bets, suggestions, odds_snapshots: odds, stats,
       opinion: buildMatchOpinion({
@@ -164,7 +165,8 @@ export function apiRouter(db, { notify = null } = {}) {
       decision_postmortems,
       latest_scorecard,
       scorecards,
-      codex_opinion: latestCodexOpinion(db, row.id),
+      codex_opinion,
+      codex_opinion_meta: codexOpinionMeta(codex_opinion),
       codex_combo: codexComboForMatch(db, row.id),
       timeline: matchTimeline(db, row.id),
     });
