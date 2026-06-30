@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v13';
+const MODEL_VERSION = 'codex-book-v14';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -107,6 +107,17 @@ function forcedMarketBucket(market) {
   if (market === '1X2') return '1X2';
   if (String(market || '').startsWith('OU_')) return 'OU';
   return 'other';
+}
+
+function forcedExactMarket(market) {
+  if (market === '1X2') return '1X2';
+  const m = String(market || '').match(/^OU_(\d+(?:\.\d+)?)$/);
+  if (m) return `OU_${Number(m[1])}`;
+  return String(market || 'other');
+}
+
+function forcedExactPick(market, selection) {
+  return `${forcedExactMarket(market)}:${String(selection || 'unknown')}`;
 }
 
 function latestPrematchCodexOpinions(db, excludedMatchId, cutoffUtc = null) {
@@ -238,6 +249,36 @@ function finalizedTotalsLineBuckets(buckets) {
   }));
 }
 
+function emptyForcedBucket() {
+  return { n: 0, hits: 0, effective_n: 0, hit_weight: 0 };
+}
+
+function addForcedSample(buckets, key, verdict, rowWeight) {
+  const bucket = buckets instanceof Map
+    ? buckets.get(key) || emptyForcedBucket()
+    : buckets[key] || emptyForcedBucket();
+  bucket.n += 1;
+  bucket.effective_n += rowWeight;
+  if (verdict === 'hit') {
+    bucket.hits += 1;
+    bucket.hit_weight += rowWeight;
+  }
+  if (buckets instanceof Map) buckets.set(key, bucket);
+  else buckets[key] = bucket;
+}
+
+function finalizedForcedBuckets(buckets) {
+  const entries = buckets instanceof Map ? [...buckets.entries()] : Object.entries(buckets);
+  return Object.fromEntries(entries.map(([key, bucket]) => [
+    key,
+    {
+      n: bucket.n,
+      effective_n: round(bucket.effective_n, 2),
+      hit_rate: bucket.effective_n ? round(bucket.hit_weight / bucket.effective_n) : null,
+    },
+  ]));
+}
+
 function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
   const rows = latestPrematchCodexOpinions(db, excludedMatchId, cutoffUtc);
   const h2hPred = { home: 0, draw: 0, away: 0 };
@@ -253,9 +294,11 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
   let forcedEffectiveN = 0;
   let forcedHitWeight = 0;
   const forcedBuckets = {
-    '1X2': { n: 0, hits: 0, effective_n: 0, hit_weight: 0 },
-    OU: { n: 0, hits: 0, effective_n: 0, hit_weight: 0 },
+    '1X2': emptyForcedBucket(),
+    OU: emptyForcedBucket(),
   };
+  const forcedExactMarketBuckets = new Map();
+  const forcedExactPickBuckets = new Map();
   let totalsN = 0;
   let totalsEffectiveN = 0;
   let totalsPredOver = 0;
@@ -302,16 +345,14 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
     }
     if (forcedVerdict) {
       const bucketKey = forcedMarketBucket(row.forced_pick_market);
-      const bucket = forcedBuckets[bucketKey] || (forcedBuckets[bucketKey] = { n: 0, hits: 0, effective_n: 0, hit_weight: 0 });
       forcedN += 1;
       forcedEffectiveN += rowWeight;
-      bucket.n += 1;
-      bucket.effective_n += rowWeight;
+      addForcedSample(forcedBuckets, bucketKey, forcedVerdict, rowWeight);
+      addForcedSample(forcedExactMarketBuckets, forcedExactMarket(row.forced_pick_market), forcedVerdict, rowWeight);
+      addForcedSample(forcedExactPickBuckets, forcedExactPick(row.forced_pick_market, row.forced_pick_selection), forcedVerdict, rowWeight);
       if (forcedVerdict === 'hit') {
         forcedHits += 1;
         forcedHitWeight += rowWeight;
-        bucket.hits += 1;
-        bucket.hit_weight += rowWeight;
       }
     }
 
@@ -344,14 +385,9 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
   const h2hBias = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, h2hN ? round(h2hActualAvg[o] - h2hPredAvg[o]) : 0]));
   const totalsPredAvg = totalsEffectiveN ? round(totalsPredOver / totalsEffectiveN) : null;
   const totalsActualAvg = totalsEffectiveN ? round(totalsActualOver / totalsEffectiveN) : null;
-  const forcedByMarket = Object.fromEntries(Object.entries(forcedBuckets).map(([market, bucket]) => [
-    market,
-    {
-      n: bucket.n,
-      effective_n: round(bucket.effective_n, 2),
-      hit_rate: bucket.effective_n ? round(bucket.hit_weight / bucket.effective_n) : null,
-    },
-  ]));
+  const forcedByMarket = finalizedForcedBuckets(forcedBuckets);
+  const forcedByExactMarket = finalizedForcedBuckets(forcedExactMarketBuckets);
+  const forcedByExactPick = finalizedForcedBuckets(forcedExactPickBuckets);
 
   return {
     available: h2hN > 0 || totalsN > 0,
@@ -383,6 +419,8 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
       hit_rate: forcedEffectiveN ? round(forcedHitWeight / forcedEffectiveN) : null,
       raw_hit_rate: forcedN ? round(forcedHits / forcedN) : null,
       by_market: forcedByMarket,
+      by_exact_market: forcedByExactMarket,
+      by_exact_pick: forcedByExactPick,
     },
   };
 }
@@ -1615,12 +1653,47 @@ function adjustTotals(lines, scorecard) {
   });
 }
 
-function forcedReliabilityAdjustment(calibration, bucket) {
+function forcedReliabilityDelta(stats, globalHit, { minEffectiveN, anchor, factor, minDelta, maxDelta }) {
+  if (!stats?.effective_n || stats.effective_n < minEffectiveN || stats.hit_rate == null || globalHit == null) return 0;
+  const sampleWeight = stats.effective_n / (stats.effective_n + anchor);
+  return round(clamp((stats.hit_rate - globalHit) * sampleWeight * factor, minDelta, maxDelta));
+}
+
+function forcedMarketReliabilityAdjustment(calibration, bucket) {
   const marketStats = calibration?.forced?.by_market?.[bucket];
   const globalHit = calibration?.forced?.hit_rate;
-  if (!marketStats?.effective_n || marketStats.effective_n < 6 || marketStats.hit_rate == null || globalHit == null) return 0;
-  const sampleWeight = marketStats.effective_n / (marketStats.effective_n + 10);
-  return round(clamp((marketStats.hit_rate - globalHit) * sampleWeight * 0.18, -0.035, 0.025));
+  return forcedReliabilityDelta(marketStats, globalHit, {
+    minEffectiveN: 6,
+    anchor: 8,
+    factor: 0.22,
+    minDelta: -0.04,
+    maxDelta: 0.03,
+  });
+}
+
+function forcedExactMarketReliabilityAdjustment(calibration, market) {
+  if (!String(market || '').startsWith('OU_')) return 0;
+  const exactStats = calibration?.forced?.by_exact_market?.[forcedExactMarket(market)];
+  const globalHit = calibration?.forced?.hit_rate;
+  return forcedReliabilityDelta(exactStats, globalHit, {
+    minEffectiveN: 3,
+    anchor: 6,
+    factor: 0.26,
+    minDelta: -0.045,
+    maxDelta: 0.025,
+  });
+}
+
+function forcedExactPickReliabilityAdjustment(calibration, market, selection) {
+  const exactStats = calibration?.forced?.by_exact_pick?.[forcedExactPick(market, selection)];
+  const globalHit = calibration?.forced?.hit_rate;
+  return forcedReliabilityDelta(exactStats, globalHit, {
+    minEffectiveN: 4,
+    anchor: 8,
+    factor: 0.18,
+    minDelta: -0.025,
+    maxDelta: 0.018,
+  });
 }
 
 function marketDepthAdjustment(candidate) {
@@ -1630,6 +1703,22 @@ function marketDepthAdjustment(candidate) {
   if (!books) return -0.018;
   if (books < 3) return -0.012 * (3 - books);
   return 0;
+}
+
+function forcedCandidateDiagnostic(candidate) {
+  return {
+    market: candidate.market,
+    selection: candidate.selection,
+    label: candidate.label,
+    probability: candidate.probability,
+    choice_score: candidate.choice_score,
+    choice_adjustments: candidate.choice_adjustments,
+    fair_odds: candidate.fair_odds,
+    market_price: candidate.market_price,
+    edge: candidate.edge,
+    source_books: candidate.source_books,
+    synthetic: !!candidate.synthetic,
+  };
 }
 
 function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
@@ -1665,19 +1754,31 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
   }
   for (const candidate of candidates) {
     const bucket = forcedMarketBucket(candidate.market);
-    const reliability = forcedReliabilityAdjustment(calibration, bucket);
+    const marketReliability = forcedMarketReliabilityAdjustment(calibration, bucket);
+    const exactMarketReliability = forcedExactMarketReliabilityAdjustment(calibration, candidate.market);
+    const exactPickReliability = forcedExactPickReliabilityAdjustment(calibration, candidate.market, candidate.selection);
+    const reliability = round(marketReliability + exactMarketReliability + exactPickReliability);
     const depth = marketDepthAdjustment(candidate);
     const edge = candidate.edge == null ? 0 : clamp(candidate.edge * 0.08, -0.012, 0.018);
     candidate.choice_score = round(candidate.probability + reliability + depth + edge);
-    candidate.choice_adjustments = { reliability, depth, edge };
+    candidate.choice_adjustments = {
+      reliability,
+      market_reliability: marketReliability,
+      exact_market_reliability: exactMarketReliability,
+      exact_pick_reliability: exactPickReliability,
+      depth,
+      edge,
+    };
   }
-  return candidates.sort((a, b) => {
+  const ranked = candidates.sort((a, b) => {
     const byScore = b.choice_score - a.choice_score;
     if (Math.abs(byScore) > 0.0001) return byScore;
     const byProbability = b.probability - a.probability;
     if (Math.abs(byProbability) > 0.0001) return byProbability;
     return (b.edge ?? -Infinity) - (a.edge ?? -Infinity);
-  })[0];
+  });
+  ranked[0].alternatives = ranked.slice(1, 5).map(forcedCandidateDiagnostic);
+  return ranked[0];
 }
 
 function confidence({ market, totals, intel, scorecard, previous, calibration, teamForm, live, marketMovement }) {
@@ -2204,7 +2305,14 @@ export function generateCodexOpinion(db, matchId) {
         weight: calibration.totals.weight,
         by_line: calibration.totals.by_line,
       },
-      forced: { n: calibration.forced.n, effective_n: calibration.forced.effective_n, hit_rate: calibration.forced.hit_rate, by_market: calibration.forced.by_market },
+      forced: {
+        n: calibration.forced.n,
+        effective_n: calibration.forced.effective_n,
+        hit_rate: calibration.forced.hit_rate,
+        by_market: calibration.forced.by_market,
+        by_exact_market: calibration.forced.by_exact_market,
+        by_exact_pick: calibration.forced.by_exact_pick,
+      },
     },
     team_form: {
       latest_match_at: teamForm.latest_match_at,
@@ -2254,6 +2362,7 @@ export function generateCodexOpinion(db, matchId) {
       choice_score: forced.choice_score,
       choice_adjustments: forced.choice_adjustments,
       source_books: forced.source_books,
+      alternatives: forced.alternatives || [],
     },
     live_context: live,
   };
@@ -2301,10 +2410,14 @@ export function generateCodexOpinion(db, matchId) {
       totals_market_movement_adjusted: !!t.totals_market_movement_adjusted,
     })),
     forced_choice: {
+      market: forced.market,
+      selection: forced.selection,
+      label: forced.label,
       choice_score: forced.choice_score,
       choice_adjustments: forced.choice_adjustments,
       source_books: forced.source_books,
       market_depth_weight: forced.market_depth_weight ?? null,
+      alternatives: forced.alternatives || [],
     },
     previous_opinion_id: previous?.id || null,
     input_hash: hash,
