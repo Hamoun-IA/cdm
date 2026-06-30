@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v19';
+const MODEL_VERSION = 'codex-book-v20';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -1858,6 +1858,22 @@ function forcedMarketReliabilityAdjustment(calibration, bucket) {
   });
 }
 
+function forcedMarketClassReliabilityAdjustment(calibration, bucket) {
+  const byMarket = calibration?.forced?.by_market || {};
+  const stats = byMarket[bucket];
+  const reference = bucket === '1X2' ? byMarket.OU : byMarket['1X2'];
+  if (
+    !stats?.effective_n || !reference?.effective_n ||
+    stats.effective_n < 8 || reference.effective_n < 8 ||
+    stats.hit_rate == null || reference.hit_rate == null
+  ) return 0;
+  const gap = Number(stats.hit_rate) - Number(reference.hit_rate);
+  if (Math.abs(gap) < 0.08) return 0;
+  const sampleWeight = Math.min(stats.effective_n, reference.effective_n) /
+    (Math.min(stats.effective_n, reference.effective_n) + 10);
+  return round(clamp((Math.abs(gap) - 0.08) * Math.sign(gap) * sampleWeight * 0.36, -0.04, 0.026));
+}
+
 function forcedExactMarketReliabilityAdjustment(calibration, market) {
   if (!String(market || '').startsWith('OU_')) return 0;
   const exactStats = calibration?.forced?.by_exact_market?.[forcedExactMarket(market)];
@@ -1949,9 +1965,10 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
   for (const candidate of candidates) {
     const bucket = forcedMarketBucket(candidate.market);
     const marketReliability = forcedMarketReliabilityAdjustment(calibration, bucket);
+    const marketClassReliability = forcedMarketClassReliabilityAdjustment(calibration, bucket);
     const exactMarketReliability = forcedExactMarketReliabilityAdjustment(calibration, candidate.market);
     const exactPickReliability = forcedExactPickReliabilityAdjustment(calibration, candidate.market, candidate.selection);
-    const reliability = round(marketReliability + exactMarketReliability + exactPickReliability);
+    const reliability = round(marketReliability + marketClassReliability + exactMarketReliability + exactPickReliability);
     const depth = marketDepthAdjustment(candidate);
     const syntheticLean = syntheticLeanAdjustment(candidate);
     const edge = candidate.edge == null ? 0 : clamp(candidate.edge * 0.08, -0.012, 0.018);
@@ -1959,6 +1976,7 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
     candidate.choice_adjustments = {
       reliability,
       market_reliability: marketReliability,
+      market_class_reliability: marketClassReliability,
       exact_market_reliability: exactMarketReliability,
       exact_pick_reliability: exactPickReliability,
       depth,

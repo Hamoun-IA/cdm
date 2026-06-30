@@ -81,7 +81,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v19');
+  assert.equal(opinion.model_version, 'codex-book-v20');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -431,7 +431,7 @@ test('generateCodexOpinion : le choix force apprend les lignes exactes historiqu
   for (let id = 2; id <= 10; id++) {
     insertFinishedMatch(db, {
       id,
-      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      kickoff: `2026-06-10T00:${String(id).padStart(2, '0')}:00Z`,
       homeScore: 1,
       awayScore: 0,
     });
@@ -448,7 +448,7 @@ test('generateCodexOpinion : le choix force apprend les lignes exactes historiqu
   for (let id = 11; id <= 19; id++) {
     insertFinishedMatch(db, {
       id,
-      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      kickoff: `2026-06-10T00:${String(id).padStart(2, '0')}:00Z`,
       homeScore: 1,
       awayScore: 0,
     });
@@ -487,6 +487,68 @@ test('generateCodexOpinion : le choix force apprend les lignes exactes historiqu
   assert.equal(opinion.forced_pick_selection, 'home');
   assert.ok(ouCandidate.choice_adjustments.exact_market_reliability < 0);
   assert.ok(ouCandidate.choice_adjustments.exact_pick_reliability < 0);
+});
+
+test('generateCodexOpinion : favorise le 1X2 quand les O/U forcés sous-performent', () => {
+  const db = freshDb();
+  for (let id = 2; id <= 13; id++) {
+    insertFinishedMatch(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      homeScore: 1,
+      awayScore: 0,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-10T00:00:00Z',
+      modelVersion: 'codex-book-v19',
+      probabilities: { home: 0.58, draw: 0.26, away: 0.16 },
+      totals: [],
+      forcedMarket: '1X2',
+      forcedSelection: 'home',
+    });
+  }
+  for (let id = 14; id <= 25; id++) {
+    insertFinishedMatch(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      homeScore: 1,
+      awayScore: 0,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-10T00:00:00Z',
+      modelVersion: 'codex-book-v19',
+      probabilities: { home: 0.58, draw: 0.26, away: 0.16 },
+      totals: [],
+      forcedMarket: 'OU_3',
+      forcedSelection: 'over',
+    });
+  }
+  for (const [outcome, price] of [['home', 1.95], ['draw', 3.70], ['away', 4.35]]) {
+    db.prepare(`
+      INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+      VALUES (1, 'sharp-book', 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+    `).run({ outcome, price });
+  }
+  for (const bookmaker of ['book-a', 'book-b', 'book-c']) {
+    for (const [side, price] of [['over', 1.60], ['under', 2.40]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, point, price, taken_at)
+        VALUES (1, @bookmaker, 'totals', @outcome, 2.5, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome: `${side}_2.5`, price });
+    }
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const overCandidate = opinion.diagnostics.forced_choice.alternatives.find((candidate) => (
+    candidate.market === 'OU_2.5' && candidate.selection === 'over'
+  ));
+
+  assert.equal(opinion.forced_pick_market, '1X2');
+  assert.equal(opinion.forced_pick_selection, 'home');
+  assert.ok(opinion.diagnostics.forced_choice.choice_adjustments.market_class_reliability > 0);
+  assert.ok(overCandidate.choice_adjustments.market_class_reliability < 0);
 });
 
 test('generateCodexOpinion : affine les probabilités avec les avis pré-match déjà clos', () => {
