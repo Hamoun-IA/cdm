@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v51';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v52';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -94,7 +94,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v50' || version === 'codex-book-v49' || version === 'codex-book-v48' || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v51' || version === 'codex-book-v50' || version === 'codex-book-v49' || version === 'codex-book-v48' || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -3168,8 +3168,15 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
   return ranked[0];
 }
 
-function confidence({ market, totals, intel, scorecard, previous, calibration, teamForm, live, marketMovement }) {
+function confidenceDetails({ market, totals, intel, scorecard, previous, calibration, teamForm, live, marketMovement, probabilities, forced }) {
   let c = 30;
+  const adjustments = [];
+  const adjust = (key, delta, detail = null) => {
+    const value = Number(delta) || 0;
+    if (!value) return;
+    c += value;
+    adjustments.push({ key, delta: value, ...(detail || {}) });
+  };
   if (market) c += 18;
   if (market?.books >= 12) c += 2;
   if (totals.some((t) => !t.synthetic && (t.books || 0) >= 4)) c += 6;
@@ -3191,7 +3198,73 @@ function confidence({ market, totals, intel, scorecard, previous, calibration, t
   if (teamForm?.power_rating?.available && teamForm.power_rating.matches >= 8) c += 1;
   if (marketMovement?.available && marketMovement.max_delta >= 0.025) c += 1;
   if (live?.active) c += live.score_known ? 2 : -5;
-  return clamp(Math.round(c), 20, 82);
+
+  let topOutcome = null;
+  let topProb = null;
+  let secondProb = null;
+  let probabilityMargin = null;
+  if (validH2h(probabilities) && !live?.active) {
+    const ranked = H2H_OUTCOMES
+      .map((outcome) => ({ outcome, probability: Number(probabilities[outcome] || 0) }))
+      .sort((a, b) => b.probability - a.probability);
+    topOutcome = ranked[0]?.outcome || null;
+    topProb = ranked[0]?.probability ?? null;
+    secondProb = ranked[1]?.probability ?? null;
+    probabilityMargin = topProb != null && secondProb != null ? topProb - secondProb : null;
+    if (probabilityMargin != null) {
+      if (probabilityMargin < 0.06) adjust('probability_margin_thin', -7, { probability_margin: round(probabilityMargin) });
+      else if (probabilityMargin < 0.12) adjust('probability_margin_small', -4, { probability_margin: round(probabilityMargin) });
+      else if (probabilityMargin < 0.20) adjust('probability_margin_medium', -2, { probability_margin: round(probabilityMargin) });
+    }
+
+    if (forced?.market === '1X2' && forced.selection && forced.selection !== topOutcome) {
+      const forcedProb = Number(probabilities[forced.selection] || 0);
+      const forcedGap = Number(topProb || 0) - forcedProb;
+      if (forcedGap >= 0.12) adjust('forced_pick_not_top_scenario', -5, { top_outcome: topOutcome, forced_selection: forced.selection, forced_gap: round(forcedGap) });
+      else if (forcedGap >= 0.06) adjust('forced_pick_near_top_scenario', -3, { top_outcome: topOutcome, forced_selection: forced.selection, forced_gap: round(forcedGap) });
+    }
+  }
+
+  const forcedMarket = String(forced?.market || '');
+  const forcedIsOu = forcedMarket.startsWith('OU_');
+  let forcedMarketClassGap = null;
+  if (forcedIsOu && !live?.active) {
+    const byMarket = calibration?.forced?.by_market || {};
+    const oneX2 = byMarket['1X2'];
+    const ou = byMarket.OU;
+    if (
+      oneX2?.effective_n >= 8 && ou?.effective_n >= 8 &&
+      oneX2.hit_rate != null && ou.hit_rate != null
+    ) {
+      forcedMarketClassGap = Number(oneX2.hit_rate) - Number(ou.hit_rate);
+      if (forcedMarketClassGap >= 0.08) {
+        const penalty = -Math.round(clamp((forcedMarketClassGap - 0.06) * 38, 2, 6));
+        adjust('forced_ou_class_underperformance', penalty, { one_x2_hit_rate: round(oneX2.hit_rate), ou_hit_rate: round(ou.hit_rate), gap: round(forcedMarketClassGap) });
+      }
+    }
+    const exact = calibration?.forced?.by_exact_market?.[forcedExactMarket(forcedMarket)];
+    const globalHit = calibration?.forced?.hit_rate;
+    if (exact?.effective_n >= 6 && exact.hit_rate != null && globalHit != null) {
+      const exactGap = Number(globalHit) - Number(exact.hit_rate);
+      if (exactGap >= 0.05) adjust('forced_ou_exact_underperformance', -2, { market: forcedMarket, exact_hit_rate: round(exact.hit_rate), global_hit_rate: round(globalHit), gap: round(exactGap) });
+    }
+    if (forcedMarket === 'OU_2.5' && validH2h(probabilities) && Number(probabilities.draw || 0) >= 0.42) {
+      adjust('forced_ou_25_central_draw_overlap', -3, { draw_probability: round(probabilities.draw) });
+    }
+  }
+
+  const score = clamp(Math.round(c), 20, 82);
+  return {
+    score,
+    adjustments,
+    top_outcome: topOutcome,
+    top_probability: topProb == null ? null : round(topProb),
+    second_probability: secondProb == null ? null : round(secondProb),
+    probability_margin: probabilityMargin == null ? null : round(probabilityMargin),
+    forced_market: forced?.market || null,
+    forced_selection: forced?.selection || null,
+    forced_market_class_gap: forcedMarketClassGap == null ? null : round(forcedMarketClassGap),
+  };
 }
 
 function confidenceLabel(score) {
@@ -3781,7 +3854,8 @@ export function generateCodexOpinion(db, matchId) {
   h2h = applyHomeFavoriteOpenAwayTransfer(h2h, homeFavoriteOpenAwayTransfer);
   fairOdds = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, impliedOdds(h2h[o])]));
   const forced = bestForcedPick(match, h2h, fairOdds, market, totals, calibration);
-  const conf = confidence({ market, totals, intel, scorecard, previous, calibration, teamForm, live, marketMovement });
+  const confidenceContext = confidenceDetails({ market, totals, intel, scorecard, previous, calibration, teamForm, live, marketMovement, probabilities: h2h, forced });
+  const conf = confidenceContext.score;
   const previousLive = previous?.diagnostics?.live_context || null;
   const liveScoreChanged = !!(live.active && previous && (
     previousLive?.status !== live.status ||
@@ -3956,6 +4030,7 @@ export function generateCodexOpinion(db, matchId) {
       market_depth_weight: forced.market_depth_weight ?? null,
       alternatives: forced.alternatives || [],
     },
+    confidence_context: confidenceContext,
     previous_opinion_id: previous?.id || null,
     input_hash: hash,
     sources,
