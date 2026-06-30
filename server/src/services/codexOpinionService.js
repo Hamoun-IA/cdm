@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v62';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v63';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -94,7 +94,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v60' || version === 'codex-book-v59' || version === 'codex-book-v58' || version === 'codex-book-v57' || version === 'codex-book-v56' || version === 'codex-book-v55' || version === 'codex-book-v54' || version === 'codex-book-v53' || version === 'codex-book-v52' || version === 'codex-book-v51' || version === 'codex-book-v50' || version === 'codex-book-v49' || version === 'codex-book-v48' || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v62' || version === 'codex-book-v61' || version === 'codex-book-v60' || version === 'codex-book-v59' || version === 'codex-book-v58' || version === 'codex-book-v57' || version === 'codex-book-v56' || version === 'codex-book-v55' || version === 'codex-book-v54' || version === 'codex-book-v53' || version === 'codex-book-v52' || version === 'codex-book-v51' || version === 'codex-book-v50' || version === 'codex-book-v49' || version === 'codex-book-v48' || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -3776,6 +3776,41 @@ function confidenceDetails({ match, market, totals, intel, scorecard, previous, 
   if (teamForm?.available) c += teamForm.home.played && teamForm.away.played ? 3 : 1;
   else if (match?.stage === 'GROUP' && Number(match?.matchday) === 1 && !live?.active) {
     adjust('opening_group_no_team_form', -5, { stage: match.stage, matchday: match.matchday });
+  }
+  if (
+    !live?.active &&
+    match?.stage === 'GROUP' &&
+    Number(match?.matchday || 0) >= 2 &&
+    forced?.market === '1X2' &&
+    ['home', 'away'].includes(forced.selection) &&
+    validH2h(probabilities)
+  ) {
+    const side = forced.selection;
+    const opponent = side === 'home' ? 'away' : 'home';
+    const sideForm = teamForm?.[side];
+    const opponentForm = teamForm?.[opponent];
+    const sideDelta = Number(sideForm?.points_vs_expected_per_match);
+    const opponentDelta = Number(opponentForm?.points_vs_expected_per_match);
+    const forcedProbability = Number(probabilities[side] || 0);
+    if (
+      Number(sideForm?.played || 0) >= 1 &&
+      Number(opponentForm?.played || 0) >= 1 &&
+      Number(sideForm?.points) === Number(opponentForm?.points) &&
+      forcedProbability >= 0.68 &&
+      Number.isFinite(sideDelta) &&
+      Number.isFinite(opponentDelta) &&
+      sideDelta <= -0.9 &&
+      opponentDelta >= 0.6
+    ) {
+      adjust('team_form_contrarian_favorite_caution', -4, {
+        selection: side,
+        probability: round(forcedProbability),
+        selection_points_vs_expected: round(sideDelta),
+        opponent_points_vs_expected: round(opponentDelta),
+        selection_points: sideForm.points,
+        opponent_points: opponentForm.points,
+      });
+    }
   }
   if (teamForm?.power_rating?.available && teamForm.power_rating.matches >= 8) c += 1;
   if (marketMovement?.available && marketMovement.max_delta >= 0.025) c += 1;

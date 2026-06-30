@@ -249,6 +249,38 @@ test('generateCodexOpinion : calibre la confiance quand le choix force historiqu
   assert.ok(opinion.confidence_score >= 50);
 });
 
+test('generateCodexOpinion : baisse la confiance dun favori contredit par la forme tournoi', () => {
+  const db = freshDb();
+  db.prepare("UPDATE matches SET matchday = 2, kickoff_utc = '2026-06-15T19:00:00Z' WHERE id = 1").run();
+  db.prepare("INSERT INTO teams (id, fifa_code, name, group_code) VALUES (3,'TST','Test A','A'), (4,'TSB','Test B','A')").run();
+  insertTeamResult(db, { id: 2, kickoff: '2026-06-10T19:00:00Z', home: 1, away: 3, homeScore: 1, awayScore: 1 });
+  insertTeamResult(db, { id: 3, kickoff: '2026-06-10T21:00:00Z', home: 4, away: 2, homeScore: 0, awayScore: 0 });
+  insertHistoricalOpinion(db, {
+    matchId: 2,
+    generatedAt: '2026-06-10T12:00:00Z',
+    modelVersion: 'codex-book-v62',
+    probabilities: { home: 0.78, draw: 0.14, away: 0.08 },
+    forcedMarket: '1X2',
+    forcedSelection: 'home',
+  });
+  insertHistoricalOpinion(db, {
+    matchId: 3,
+    generatedAt: '2026-06-10T12:00:00Z',
+    modelVersion: 'codex-book-v62',
+    probabilities: { home: 0.78, draw: 0.14, away: 0.08 },
+    forcedMarket: '1X2',
+    forcedSelection: 'home',
+  });
+  insertStrongHomeMarket(db);
+
+  const opinion = generateCodexOpinion(db, 1);
+  const confidenceContext = opinion.diagnostics.confidence_context;
+
+  assert.equal(opinion.forced_pick_market, '1X2');
+  assert.equal(opinion.forced_pick_selection, 'home');
+  assert.ok(confidenceContext.adjustments.some((item) => item.key === 'team_form_contrarian_favorite_caution'));
+});
+
 test('generateCodexOpinion : force le nul J2 entre deux vainqueurs avec favori domicile tres bas cote', () => {
   const db = freshDb();
   db.prepare("UPDATE matches SET matchday = 2, kickoff_utc = '2026-06-15T19:00:00Z' WHERE id = 1").run();
