@@ -81,7 +81,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v18');
+  assert.equal(opinion.model_version, 'codex-book-v19');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -742,6 +742,8 @@ test('generateCodexOpinion : compresse les favoris domicile souvent tenus en ech
 
   assert.equal(opinion.diagnostics.home_favorite_draw_guard.available, true);
   assert.equal(opinion.diagnostics.home_favorite_draw_guard.applied, true);
+  assert.equal(opinion.diagnostics.home_favorite_draw_guard.strong_home_memory, true);
+  assert.ok(opinion.diagnostics.home_favorite_draw_guard.draw_delta > 0.018);
   assert.ok(opinion.diagnostics.home_favorite_draw_guard.deltas.draw > 0);
   assert.ok(opinion.probabilities.draw > baseline.probabilities.draw);
   assert.ok(opinion.probabilities.home < baseline.probabilities.home);

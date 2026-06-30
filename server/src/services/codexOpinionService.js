@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v18';
+const MODEL_VERSION = 'codex-book-v19';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -561,7 +561,7 @@ function homeFavoriteDrawGuardPlan(probs, calibration, hasMarket) {
   const confidence = favoriteProb >= 0.65 ? 'strong' : 'medium';
   const specificKey = `favorite_confidence:home:${confidence}`;
   const specificBucket = regimes[specificKey];
-  const specificUsable = specificBucket?.effective_n >= 6 && Number(specificBucket.bias?.draw || 0) > Number(globalBucket.bias?.draw || 0);
+  const specificUsable = specificBucket?.effective_n >= 6 && Number(specificBucket.bias?.draw || 0) >= Number(globalBucket.bias?.draw || 0);
   const sourceKey = specificUsable ? specificKey : 'favorite:home';
   const source = specificUsable ? specificBucket : globalBucket;
   const drawBias = Number(source.bias?.draw || 0);
@@ -580,9 +580,14 @@ function homeFavoriteDrawGuardPlan(probs, calibration, hasMarket) {
   const sampleWeight = source.effective_n / (source.effective_n + 14);
   const favoriteScale = favoriteProb >= 0.72 ? 1.14 : favoriteProb >= 0.64 ? 1 : 0.72;
   const marketScale = hasMarket ? 1 : 0.78;
-  const biasDelta = Math.max(0, drawBias - 0.04) * sampleWeight * favoriteScale * marketScale * 0.48;
-  const floorDelta = Math.max(0, 0.24 - drawProb) * 0.12 * marketScale;
-  const maxMove = hasMarket ? 0.018 : 0.014;
+  const strongHomeMemory = sourceKey === specificKey && confidence === 'strong' && source.effective_n >= 7 && drawBias >= 0.10;
+  const biasFactor = strongHomeMemory ? 0.62 : 0.48;
+  const floorFactor = strongHomeMemory ? 0.16 : 0.12;
+  const biasDelta = Math.max(0, drawBias - 0.04) * sampleWeight * favoriteScale * marketScale * biasFactor;
+  const floorDelta = Math.max(0, 0.24 - drawProb) * floorFactor * marketScale;
+  const maxMove = hasMarket
+    ? (strongHomeMemory ? 0.032 : 0.018)
+    : (strongHomeMemory ? 0.024 : 0.014);
   const drawDelta = clamp(biasDelta + floorDelta, 0, maxMove);
   const applied = drawDelta >= 0.0035;
   const deltas = { home: 0, draw: 0, away: 0 };
@@ -602,6 +607,7 @@ function homeFavoriteDrawGuardPlan(probs, calibration, hasMarket) {
     effective_n: round(source.effective_n, 2),
     source_key: sourceKey,
     sample_weight: round(sampleWeight),
+    strong_home_memory: strongHomeMemory,
     max_move: round(maxMove),
     draw_delta: applied ? round(drawDelta) : 0,
     deltas,
