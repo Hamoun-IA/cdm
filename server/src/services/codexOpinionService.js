@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v53';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v54';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -94,7 +94,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v52' || version === 'codex-book-v51' || version === 'codex-book-v50' || version === 'codex-book-v49' || version === 'codex-book-v48' || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v53' || version === 'codex-book-v52' || version === 'codex-book-v51' || version === 'codex-book-v50' || version === 'codex-book-v49' || version === 'codex-book-v48' || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -3118,6 +3118,28 @@ function ouCrossMarketFriction(candidate) {
   return -0.025;
 }
 
+function standardTotalDrawCrossoverMaxGap(topCandidate, centralDraw, calibration) {
+  if (topCandidate?.market !== 'OU_2.5' || !centralDraw) return 0;
+  const drawProb = Number(centralDraw.probability || 0);
+  if (drawProb < 0.46) return 0;
+  const topReliability = Number(topCandidate.choice_adjustments?.reliability || 0);
+  const byMarket = calibration?.forced?.by_market || {};
+  const oneX2 = byMarket['1X2'];
+  const ou = byMarket.OU;
+  const classGap = oneX2?.effective_n >= 8 && ou?.effective_n >= 8 && oneX2.hit_rate != null && ou.hit_rate != null
+    ? Number(oneX2.hit_rate) - Number(ou.hit_rate)
+    : 0;
+  const exact = calibration?.forced?.by_exact_market?.['OU_2.5'];
+  const globalHit = calibration?.forced?.hit_rate;
+  const exactGap = exact?.effective_n >= 6 && exact.hit_rate != null && globalHit != null
+    ? Number(globalHit) - Number(exact.hit_rate)
+    : 0;
+  const reliabilityBad = topReliability <= -0.015;
+  const historyBad = classGap >= 0.08 || exactGap >= 0.05;
+  if (!reliabilityBad && !historyBad) return 0;
+  return 0.08;
+}
+
 function forcedCandidateDiagnostic(candidate) {
   return {
     market: candidate.market,
@@ -3188,6 +3210,7 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
       low_depth_over15_h2h_guard: 0,
       deep_under_tie_guard: 0,
       central_draw_guard: 0,
+      standard_total_draw_crossover_guard: 0,
       knockout_side_draw_guard: 0,
       synthetic_lean: syntheticLean,
       ou_cross_market_friction: crossMarketFriction,
@@ -3246,17 +3269,21 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
     const historicalOuPenalty = ranked[0].selection === 'over'
       && topReliability <= -0.035;
     const centralDrawProb = Number(centralDraw.probability || 0);
-    const maxGap = historicalOuPenalty ? 0.055 : 0.018;
+    const standardTotalDrawCrossover = standardTotalDrawCrossoverMaxGap(ranked[0], centralDraw, calibration);
+    const maxGap = Math.max(historicalOuPenalty ? 0.055 : 0.018, standardTotalDrawCrossover);
     if (
       topIsOu
       && topReliability <= 0
       && gap >= 0
       && gap <= maxGap
-      && (centralDrawProb >= 0.45 || historicalOuPenalty)
+      && (centralDrawProb >= 0.45 || historicalOuPenalty || standardTotalDrawCrossover > 0)
     ) {
       const boost = round(gap + 0.0002);
       centralDraw.choice_score = round(centralDraw.choice_score + boost);
       centralDraw.choice_adjustments.central_draw_guard = boost;
+      if (standardTotalDrawCrossover > 0) {
+        centralDraw.choice_adjustments.standard_total_draw_crossover_guard = boost;
+      }
       ranked = sortCandidates();
     }
   }

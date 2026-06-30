@@ -578,6 +578,71 @@ test('generateCodexOpinion : penalise la confiance O/U quand l historique prefer
   assert.ok(opinion.confidence_score < 45);
 });
 
+test('generateCodexOpinion : arbitre O/U 2.5 vers le nul quand le total standard sous-performe', () => {
+  const db = freshDb();
+  db.prepare('UPDATE matches SET matchday = 2 WHERE id = 1').run();
+  db.prepare("INSERT INTO teams (id, fifa_code, name, group_code) VALUES (3,'TST','Temoin A','A'), (4,'TSB','Temoin B','A')").run();
+  for (const bookmaker of ['book-a', 'book-b', 'book-c']) {
+    for (const [outcome, price] of [['home', 2.65], ['draw', 2.35], ['away', 5.60]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+    for (const [side, price] of [['over', 50.00], ['under', 1.05]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, point, price, taken_at)
+        VALUES (1, @bookmaker, 'totals', @outcome, 2.5, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome: `${side}_2.5`, price });
+    }
+  }
+  for (let id = 2; id <= 8; id++) {
+    insertTeamResult(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      home: 3,
+      away: 4,
+      homeScore: 2,
+      awayScore: 0,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-10T00:00:00Z',
+      modelVersion: 'codex-book-v52',
+      probabilities: { home: 0.62, draw: 0.25, away: 0.13 },
+      forcedMarket: '1X2',
+      forcedSelection: 'home',
+    });
+  }
+  for (let id = 9; id <= 20; id++) {
+    insertTeamResult(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      home: 3,
+      away: 4,
+      homeScore: 2,
+      awayScore: 2,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-10T00:00:00Z',
+      modelVersion: 'codex-book-v52',
+      probabilities: { home: 0.36, draw: 0.42, away: 0.22 },
+      totals: [{ line: 2.5, probs: { over: 0.42, under: 0.58 }, fair_odds: { over: 2.38, under: 1.72 }, synthetic: false }],
+      forcedMarket: 'OU_2.5',
+      forcedSelection: 'under',
+    });
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const forcedChoice = opinion.diagnostics.forced_choice;
+
+  assert.equal(opinion.forced_pick_market, '1X2');
+  assert.equal(opinion.forced_pick_selection, 'draw');
+  assert.ok(opinion.probabilities.draw >= 0.46);
+  assert.ok(forcedChoice.choice_adjustments.standard_total_draw_crossover_guard > 0);
+});
+
 test('generateCodexOpinion : sans cotes en KO, neutralise le prior domicile et remonte le nul 90 min', () => {
   const db = freshDb();
   db.prepare("UPDATE matches SET stage = 'R32', group_code = NULL WHERE id = 1").run();
