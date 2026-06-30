@@ -939,6 +939,38 @@ test('codexOpinionHistory : rassemble les avis termines et compte seulement le p
   assert.equal(history.matches[0].opinions[1].evaluation.is_prematch, true);
 });
 
+test('codexOpinionHistory : expose les plus gros ecarts probabilistes', () => {
+  const db = freshDb();
+  db.prepare(`
+    INSERT INTO matches (id, fifa_match_number, stage, group_code, matchday, kickoff_utc, home_team_id, away_team_id, status, home_score, away_score)
+    VALUES
+      (2, 2, 'GROUP', 'A', 1, '2026-06-12T19:00:00Z', 1, 2, 'FINISHED', 0, 1),
+      (3, 3, 'GROUP', 'A', 1, '2026-06-13T19:00:00Z', 1, 2, 'FINISHED', 1, 0)
+  `).run();
+  insertHistoricalOpinion(db, {
+    matchId: 2,
+    generatedAt: '2026-06-12T08:00:00Z',
+    probabilities: { home: 0.78, draw: 0.14, away: 0.08 },
+    forcedSelection: 'home',
+  });
+  insertHistoricalOpinion(db, {
+    matchId: 3,
+    generatedAt: '2026-06-13T08:00:00Z',
+    probabilities: { home: 0.55, draw: 0.28, away: 0.17 },
+    forcedSelection: 'home',
+  });
+
+  const history = codexOpinionHistory(db);
+  const [alert] = history.audit.probability_alerts;
+
+  assert.equal(alert.match_id, 2);
+  assert.match(alert.match_label, /M2 Mexique - Afrique du Sud/);
+  assert.equal(alert.favorite_label, 'Mexique');
+  assert.equal(alert.actual_h2h_label, 'Afrique du Sud');
+  assert.ok(alert.probability_gap > 0.6);
+  assert.ok(alert.brier_score > 1);
+});
+
 test('generateCodexOpinion : fonctionne sans cotes avec priors conservateurs', () => {
   const db = freshDb();
   const opinion = generateCodexOpinion(db, 1);

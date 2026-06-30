@@ -48,6 +48,26 @@ function compactAuditMetric(metric) {
   };
 }
 
+function compactProbabilityAlert(alert) {
+  if (!alert) return null;
+  return {
+    match_id: alert.match_id,
+    fifa_match_number: alert.fifa_match_number,
+    match_label: alert.match_label,
+    stage_label: alert.stage_label,
+    score: alert.score,
+    verdict: alert.verdict,
+    forced_pick_label: alert.forced_pick_label,
+    favorite_label: alert.favorite_label,
+    actual_h2h_label: alert.actual_h2h_label,
+    favorite_probability: alert.favorite_probability,
+    actual_probability: alert.actual_probability,
+    probability_gap: alert.probability_gap,
+    brier_score: alert.brier_score,
+    confidence_score: alert.confidence_score,
+  };
+}
+
 function codexAgentFocus(audit) {
   const sample = audit?.latest_prematch;
   if (!sample?.n) {
@@ -76,10 +96,21 @@ function codexAgentFocus(audit) {
     return `${key} fragile (${rate}, ${brier}) : chercher les faits concrets qui expliquent l'ecart au marche avant tout ajustement.`;
   });
 
+  const alertFocus = (audit.probability_alerts || []).slice(0, 2).map((alert) => {
+    const match = alert.match_label || 'match';
+    const favorite = alert.favorite_label || 'favori modele';
+    const actual = alert.actual_h2h_label || 'resultat reel';
+    const brier = alert.brier_score == null ? 'Brier n/a' : `Brier ${alert.brier_score.toFixed(3)}`;
+    const gap = alert.probability_gap == null ? 'ecart n/a' : `ecart proba ${Math.round(alert.probability_gap * 100)} pts`;
+    return `${match} a produit un gros ecart proba (${favorite} modele, ${actual} reel, ${brier}, ${gap}) : Scout doit chercher le signal terrain ignore, Quant doit verifier si le regime se repete.`;
+  });
+
+  focus.push(...alertFocus);
+
   if (!focus.length) {
     focus.push("Aucun segment faible net : continuer a documenter les changements materiels depuis le dernier Avis Codex et rester proche du marche hors info sourcee.");
   }
-  return focus;
+  return focus.slice(0, 6);
 }
 
 function codexAuditForAgents(db) {
@@ -91,6 +122,7 @@ function codexAuditForAgents(db) {
     by_stage: (audit.by_stage || []).slice(0, 6).map(compactAuditMetric),
     by_confidence: (audit.by_confidence || []).slice(0, 4).map(compactAuditMetric),
     weak_segments: (audit.weak_segments || []).slice(0, 6).map(compactAuditMetric),
+    probability_alerts: (audit.probability_alerts || []).slice(0, 6).map(compactProbabilityAlert),
     investigation_focus: codexAgentFocus(audit),
   };
 }

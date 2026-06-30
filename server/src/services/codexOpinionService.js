@@ -4285,6 +4285,72 @@ function groupedAudit(opinions, keyFn) {
     .sort((a, b) => b.n - a.n || String(a.key).localeCompare(String(b.key)));
 }
 
+function auditStageLabel(match) {
+  if (!match) return 'Stage inconnu';
+  return match.stage === 'GROUP' ? `Groupe J${match.matchday}` : (match.stage || 'Stage inconnu');
+}
+
+function auditMatchLabel(match) {
+  if (!match) return 'Match inconnu';
+  const prefix = match.fifa_match_number ? `M${match.fifa_match_number} ` : '';
+  return `${prefix}${match.home_display || match.home_name || match.home_placeholder || 'Domicile'} - ${match.away_display || match.away_name || match.away_placeholder || 'Exterieur'}`;
+}
+
+function probabilityAlert(opinion) {
+  const evaluation = opinion?.evaluation || {};
+  const match = opinion?.audit_match || {};
+  const probs = opinion?.probabilities || {};
+  if (
+    !evaluation.settled ||
+    evaluation.is_prematch !== true ||
+    evaluation.brier_score == null ||
+    !evaluation.actual_h2h
+  ) {
+    return null;
+  }
+  const favoriteProb = Number(probs[evaluation.favorite_selection] || 0);
+  const actualProb = Number(probs[evaluation.actual_h2h] || 0);
+  return {
+    key: String(opinion.id),
+    opinion_id: opinion.id,
+    match_id: match.id,
+    fifa_match_number: match.fifa_match_number,
+    match_label: auditMatchLabel(match),
+    stage_label: auditStageLabel(match),
+    score: evaluation.actual_score,
+    verdict: evaluation.verdict,
+    verdict_label: evaluation.verdict_label,
+    forced_pick_label: opinion.forced_pick_label,
+    forced_pick_market: opinion.forced_pick_market,
+    favorite_selection: evaluation.favorite_selection,
+    favorite_label: evaluation.favorite_label,
+    actual_h2h: evaluation.actual_h2h,
+    actual_h2h_label: evaluation.actual_h2h_label,
+    favorite_probability: round(favoriteProb),
+    actual_probability: round(actualProb),
+    probability_gap: round(favoriteProb - actualProb),
+    brier_score: round(evaluation.brier_score),
+    confidence_score: opinion.confidence_score,
+  };
+}
+
+function probabilityAlerts(opinions) {
+  return opinions
+    .map(probabilityAlert)
+    .filter(Boolean)
+    .filter((alert) => (
+      alert.verdict === 'miss' ||
+      alert.probability_gap >= 0.18 ||
+      alert.brier_score >= 0.75
+    ))
+    .sort((a, b) => {
+      const brierGap = b.brier_score - a.brier_score;
+      if (Math.abs(brierGap) > 0.0001) return brierGap;
+      return b.probability_gap - a.probability_gap;
+    })
+    .slice(0, 8);
+}
+
 function codexHistoryAudit(matches) {
   const latestPrematch = matches
     .map((entry) => {
@@ -4317,6 +4383,7 @@ function codexHistoryAudit(matches) {
     by_stage: byStage,
     by_confidence: byConfidence,
     weak_segments: weakSegments,
+    probability_alerts: probabilityAlerts(latestPrematch),
   };
 }
 

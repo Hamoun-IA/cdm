@@ -681,6 +681,44 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
   color: var(--ink-mid);
   font-size: .72rem;
 }
+.codex-proba-card {
+  overflow: hidden;
+}
+.codex-proba-table {
+  display: grid;
+}
+.codex-proba-head,
+.codex-proba-row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1.35fr) minmax(7rem, .85fr) minmax(7rem, .85fr) 4rem 3rem;
+  gap: .55rem;
+  align-items: center;
+  padding: .44rem .6rem;
+  border-top: 1px solid var(--line-soft);
+}
+.codex-proba-head {
+  border-top: none;
+  color: var(--ink-soft);
+  font-size: .62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.codex-proba-row b,
+.codex-proba-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codex-proba-row b {
+  color: var(--ink);
+  font-size: .74rem;
+}
+.codex-proba-row span {
+  color: var(--ink-mid);
+  font-size: .72rem;
+}
 @media (max-width: 900px) {
   .codex-audit-strip,
   .codex-audit-grid {
@@ -695,6 +733,10 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
   .codex-audit-head,
   .codex-audit-row {
     grid-template-columns: minmax(0, 1fr) 2rem 2.8rem 3.2rem 2.8rem;
+  }
+  .codex-proba-head,
+  .codex-proba-row {
+    grid-template-columns: minmax(0, 1fr) minmax(5.5rem, .8fr) minmax(5.5rem, .8fr) 3.5rem 2.8rem;
   }
 }
 .codex-history-list {

@@ -60,6 +60,33 @@ function AuditTable({ title, rows = [] }) {
   );
 }
 
+function ProbabilityAlerts({ rows = [] }) {
+  if (!rows.length) return null;
+  return (
+    <section className="card codex-audit-card codex-proba-card">
+      <h3>Ecarts probas</h3>
+      <div className="codex-proba-table">
+        <div className="codex-proba-head">
+          <span>Match</span>
+          <span>Modele</span>
+          <span>Reel</span>
+          <span>Brier</span>
+          <span>Conf.</span>
+        </div>
+        {rows.map((row) => (
+          <div className="codex-proba-row" key={row.key || `${row.match_id}-${row.opinion_id}`}>
+            <b>{row.match_label}</b>
+            <span>{row.favorite_label || 'n/a'} {pct0(row.favorite_probability)}</span>
+            <span>{row.actual_h2h_label || 'n/a'} {pct0(row.actual_probability)}</span>
+            <span className="num">{row.brier_score == null ? 'n/a' : Number(row.brier_score).toFixed(3)}</span>
+            <span className="num">{row.confidence_score == null ? 'n/a' : Math.round(Number(row.confidence_score))}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function AuditPanel({ audit }) {
   if (!audit?.latest_prematch) return null;
   const latest = audit.latest_prematch;
@@ -77,6 +104,7 @@ function AuditPanel({ audit }) {
         <AuditTable title="Par confiance" rows={audit.by_confidence} />
         <AuditTable title="Zones a surveiller" rows={audit.weak_segments} />
       </div>
+      <ProbabilityAlerts rows={audit.probability_alerts} />
     </div>
   );
 }
