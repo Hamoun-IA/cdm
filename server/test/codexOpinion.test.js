@@ -81,7 +81,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v27');
+  assert.equal(opinion.model_version, 'codex-book-v28');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -992,6 +992,52 @@ test('generateCodexOpinion : renforce prudemment le nul des favoris domicile mod
   assert.ok(guard.favorite_prob < 0.65);
   assert.ok(guard.draw_delta > 0.018);
   assert.ok(opinion.probabilities.draw > 0.30);
+});
+
+test('generateCodexOpinion : compresse le nul des favoris exterieurs moderes fiables', () => {
+  const db = freshDb();
+  db.prepare("INSERT INTO teams (id, fifa_code, name, group_code) VALUES (3,'TST','Temoin A','A'), (4,'TSB','Temoin B','A')").run();
+  for (const [bookmaker, home, draw, away] of [
+    ['book-a', 5.60, 4.10, 1.64],
+    ['book-b', 5.40, 4.00, 1.67],
+    ['book-c', 5.80, 4.20, 1.62],
+  ]) {
+    for (const [outcome, price] of [['home', home], ['draw', draw], ['away', away]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+  }
+  for (let id = 2; id <= 15; id++) {
+    insertTeamResult(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      home: 3,
+      away: 4,
+      homeScore: 0,
+      awayScore: 1,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-10T00:00:00Z',
+      modelVersion: 'codex-book-v27',
+      probabilities: { home: 0.18, draw: 0.24, away: 0.58 },
+      forcedMarket: '1X2',
+      forcedSelection: 'away',
+    });
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const compression = opinion.diagnostics.away_favorite_draw_compression;
+
+  assert.equal(compression.available, true);
+  assert.equal(compression.applied, true);
+  assert.equal(compression.source_key, 'favorite_confidence:away:medium');
+  assert.ok(compression.draw_delta < 0);
+  assert.ok(compression.deltas.away > 0);
+  assert.ok(opinion.probabilities.draw < compression.draw_prob);
+  assert.match(opinion.summary, /Memoire favoris exterieurs/);
 });
 
 test('generateCodexOpinion : protege le nul quand le mouvement home est trop agressif', () => {

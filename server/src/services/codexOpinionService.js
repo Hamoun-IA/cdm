@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v27';
+const MODEL_VERSION = 'codex-book-v28';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -621,6 +621,95 @@ function homeFavoriteDrawGuardPlan(probs, calibration, hasMarket) {
 }
 
 function applyHomeFavoriteDrawGuard(probs, plan) {
+  if (!plan?.available || !plan.applied) return probs;
+  const adjusted = {};
+  for (const outcome of H2H_OUTCOMES) {
+    adjusted[outcome] = clamp(probs[outcome] + Number(plan.deltas?.[outcome] || 0), 0.025, 0.94);
+  }
+  return normalize(adjusted);
+}
+
+function awayFavoriteDrawCompressionPlan(probs, calibration, hasMarket) {
+  const base = {
+    available: false,
+    applied: false,
+    favorite: null,
+    favorite_prob: probs?.away == null ? null : round(probs.away),
+    draw_prob: probs?.draw == null ? null : round(probs.draw),
+    draw_bias: null,
+    effective_n: null,
+    source_key: null,
+    draw_delta: 0,
+    deltas: { home: 0, draw: 0, away: 0 },
+  };
+  if (!validH2h(probs)) return base;
+  const favorite = H2H_OUTCOMES.reduce((acc, o) => probs[o] > probs[acc] ? o : acc, 'home');
+  const favoriteProb = Number(probs[favorite]);
+  const drawProb = Number(probs.draw);
+  if (favorite !== 'away' || favoriteProb < 0.55 || favoriteProb >= 0.7 || drawProb <= 0.13) {
+    return {
+      ...base,
+      favorite,
+      favorite_prob: round(favoriteProb),
+      draw_prob: round(drawProb),
+    };
+  }
+
+  const specificKey = 'favorite_confidence:away:medium';
+  const favoriteKey = 'favorite:away';
+  const specific = calibration?.h2h_regimes?.[specificKey];
+  const favoriteBucket = calibration?.h2h_regimes?.[favoriteKey];
+  let sourceKey = specificKey;
+  let source = specific;
+  if (!(Number(specific?.effective_n || 0) >= 6 && Number(specific?.bias?.draw || 0) <= -0.045)) {
+    sourceKey = favoriteKey;
+    source = favoriteBucket;
+  }
+  const effectiveN = Number(source?.effective_n || 0);
+  const drawBias = Number(source?.bias?.draw || 0);
+  if (effectiveN < 6 || drawBias > -0.045) {
+    return {
+      ...base,
+      available: true,
+      favorite,
+      favorite_prob: round(favoriteProb),
+      draw_prob: round(drawProb),
+      draw_bias: round(drawBias),
+      effective_n: round(effectiveN, 2),
+      source_key: sourceKey,
+    };
+  }
+
+  const sampleWeight = effectiveN / (effectiveN + 12);
+  const marketScale = hasMarket ? 1 : 0.72;
+  const biasDelta = Math.max(0, Math.abs(drawBias) - 0.025) * sampleWeight * marketScale * 0.68;
+  const maxMove = hasMarket ? 0.034 : 0.022;
+  const drawDelta = clamp(biasDelta, 0, maxMove);
+  const applied = drawDelta >= 0.0035;
+  const deltas = { home: 0, draw: 0, away: 0 };
+  if (applied) {
+    deltas.draw = round(-drawDelta);
+    deltas.away = round(drawDelta * 0.82);
+    deltas.home = round(drawDelta * 0.18);
+  }
+
+  return {
+    available: true,
+    applied,
+    favorite,
+    favorite_prob: round(favoriteProb),
+    draw_prob: round(drawProb),
+    draw_bias: round(drawBias),
+    effective_n: round(effectiveN, 2),
+    source_key: sourceKey,
+    sample_weight: round(sampleWeight),
+    max_move: round(maxMove),
+    draw_delta: applied ? round(-drawDelta) : 0,
+    deltas,
+  };
+}
+
+function applyAwayFavoriteDrawCompression(probs, plan) {
   if (!plan?.available || !plan.applied) return probs;
   const adjusted = {};
   for (const outcome of H2H_OUTCOMES) {
@@ -2329,6 +2418,13 @@ function homeFavoriteDrawGuardSummary(match, adjustment) {
   return ` Memoire favoris tenus en echec : ${favorite} est legerement compresse vers le nul (+${(Number(adjustment.draw_delta || 0) * 100).toFixed(1)} pt).`;
 }
 
+function awayFavoriteDrawCompressionSummary(match, adjustment) {
+  if (!adjustment?.available || !adjustment.applied) return '';
+  const favorite = adjustment.favorite ? teamName(match, adjustment.favorite) : teamName(match, 'away');
+  const drawShift = Math.abs(Number(adjustment.draw_delta || 0) * 100).toFixed(1);
+  return ` Memoire favoris exterieurs : ${favorite} garde le dessus et le nul est legerement compresse (retrait ${drawShift} pt).`;
+}
+
 function knockoutDrawFloorGuardSummary(match, adjustment) {
   if (!adjustment?.available || !adjustment.applied) return '';
   const favorite = adjustment.favorite ? teamName(match, adjustment.favorite) : 'le favori';
@@ -2341,7 +2437,7 @@ function strongFavoriteDrawFloorGuardSummary(match, adjustment) {
   return ` Plancher favori fort : ${favorite} reste prioritaire, mais le nul est rehausse (+${(Number(adjustment.draw_delta || 0) * 100).toFixed(1)} pt).`;
 }
 
-function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, knockoutDrawFloorGuard, strongFavoriteDrawFloorGuard) {
+function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, strongFavoriteDrawFloorGuard) {
   const ordered = H2H_OUTCOMES.slice().sort((a, b) => h2h[b] - h2h[a]);
   const fav = ordered[0];
   const favName = teamName(match, fav);
@@ -2364,12 +2460,13 @@ function summarize(match, h2h, totals, forced, conf, sources, calibration, teamF
   const rest = restContextSummary(match, restContext, restAdjustment);
   const knockoutRegulation = knockoutRegulationSummary(match, knockoutRegulationAdjustment);
   const homeDrawGuard = homeFavoriteDrawGuardSummary(match, homeFavoriteDrawGuard);
+  const awayDrawCompression = awayFavoriteDrawCompressionSummary(match, awayFavoriteDrawCompression);
   const koDrawFloor = knockoutDrawFloorGuardSummary(match, knockoutDrawFloorGuard);
   const strongDrawFloor = strongFavoriteDrawFloorGuardSummary(match, strongFavoriteDrawFloorGuard);
   const learned = calibrationSummary(calibration, regimeCalibration);
   return {
     headline: `${favName} ${h2h[fav] >= 0.5 ? 'net favori Codex' : 'léger avantage Codex'}`,
-    summary: `${lead}${ou}${liveText}${movement}${totalsMove} ${data}${form}${rest}${knockoutRegulation}${homeDrawGuard}${koDrawFloor}${strongDrawFloor}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
+    summary: `${lead}${ou}${liveText}${movement}${totalsMove} ${data}${form}${rest}${knockoutRegulation}${homeDrawGuard}${awayDrawCompression}${koDrawFloor}${strongDrawFloor}${depth}${goalsPace}${learned}${pick} Confiance ${confidenceLabel(conf)}.`,
   };
 }
 
@@ -2641,12 +2738,13 @@ export function generateCodexOpinion(db, matchId) {
   h2h = regimeCalibration.probs;
   const homeFavoriteDrawGuard = homeFavoriteDrawGuardPlan(h2h, calibration, !!market);
   h2h = applyHomeFavoriteDrawGuard(h2h, homeFavoriteDrawGuard);
+  const awayFavoriteDrawCompression = awayFavoriteDrawCompressionPlan(h2h, calibration, !!market);
+  h2h = applyAwayFavoriteDrawCompression(h2h, awayFavoriteDrawCompression);
   const knockoutDrawFloorGuard = knockoutDrawFloorGuardPlan(match, h2h, !!market, live);
   h2h = applyKnockoutDrawFloorGuard(h2h, knockoutDrawFloorGuard);
   const strongFavoriteDrawFloorGuard = strongFavoriteDrawFloorGuardPlan(match, h2h, !!market, live);
   h2h = applyStrongFavoriteDrawFloorGuard(h2h, strongFavoriteDrawFloorGuard);
   h2h = applyLiveH2hAdjustment(h2h, live);
-  const fairOdds = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, impliedOdds(h2h[o])]));
 
   const rawTotals = totalsMarkets(odds);
   const totalsInput = rawTotals.length
@@ -2671,6 +2769,7 @@ export function generateCodexOpinion(db, matchId) {
     ),
     live
   );
+  const fairOdds = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, impliedOdds(h2h[o])]));
   const forced = bestForcedPick(match, h2h, fairOdds, market, totals, calibration);
   const conf = confidence({ market, totals, intel, scorecard, previous, calibration, teamForm, live, marketMovement });
   const previousLive = previous?.diagnostics?.live_context || null;
@@ -2748,6 +2847,7 @@ export function generateCodexOpinion(db, matchId) {
     },
     knockout_regulation_adjustment: knockoutRegulationAdjustment,
     home_favorite_draw_guard: homeFavoriteDrawGuard,
+    away_favorite_draw_compression: awayFavoriteDrawCompression,
     knockout_draw_floor_guard: knockoutDrawFloorGuard,
     strong_favorite_draw_floor_guard: strongFavoriteDrawFloorGuard,
     market_movement: marketMovement,
@@ -2793,7 +2893,7 @@ export function generateCodexOpinion(db, matchId) {
     live_score_changed: liveScoreChanged,
   };
   const changes = changeSummary(previous, sources);
-  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, knockoutDrawFloorGuard, strongFavoriteDrawFloorGuard);
+  const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, strongFavoriteDrawFloorGuard);
   const diagnostics = {
     model_version: MODEL_VERSION,
     h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_knockout90_power_rating_regime_draw_guard_calibrated`,
@@ -2837,6 +2937,7 @@ export function generateCodexOpinion(db, matchId) {
     rest_context: { ...restContext, adjustment: restAdjustment },
     knockout_regulation_adjustment: knockoutRegulationAdjustment,
     home_favorite_draw_guard: homeFavoriteDrawGuard,
+    away_favorite_draw_compression: awayFavoriteDrawCompression,
     knockout_draw_floor_guard: knockoutDrawFloorGuard,
     strong_favorite_draw_floor_guard: strongFavoriteDrawFloorGuard,
     live_context: live,
