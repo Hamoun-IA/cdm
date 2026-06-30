@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v31';
+const MODEL_VERSION = 'codex-book-v32';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -1454,28 +1454,63 @@ function applyGroupOpeningDrawAdjustment(probs, plan) {
   return normalize(adjusted);
 }
 
+function forcedOuDrawSettings(preliminaryForced) {
+  const market = String(preliminaryForced?.market || '');
+  const match = market.match(/^OU_(\d+(?:\.\d+)?)$/);
+  const line = match ? Number(match[1]) : null;
+  if (line === 2.5) {
+    return {
+      line,
+      profile: 'standard_total_2_5',
+      targetDraw: 0.42,
+      factor: 0.8,
+      maxMove: 0.045,
+    };
+  }
+  if (line === 1.5) {
+    return {
+      line,
+      profile: 'low_total_1_5_moderate_draw_boost',
+      targetDraw: 0.36,
+      factor: 0.8,
+      maxMove: 0.026,
+    };
+  }
+  return {
+    line,
+    profile: 'generic_ou',
+    targetDraw: 0.36,
+    factor: 0.8,
+    maxMove: 0.026,
+  };
+}
+
 function forcedOuDrawAdjustmentPlan(probs, preliminaryForced, live) {
-  const ouForced = String(preliminaryForced?.market || '').startsWith('OU_');
+  const market = String(preliminaryForced?.market || '');
+  const ouForced = market.startsWith('OU_');
+  const settings = forcedOuDrawSettings(preliminaryForced);
   const base = {
     available: ouForced && !live?.active,
     applied: false,
     preliminary_market: preliminaryForced?.market || null,
     preliminary_selection: preliminaryForced?.selection || null,
     preliminary_synthetic: !!preliminaryForced?.synthetic,
+    line: settings.line,
+    profile: settings.profile,
     source_books: preliminaryForced?.source_books ?? null,
     draw_prob: probs?.draw == null ? null : round(probs.draw),
-    target_draw: null,
-    max_move: null,
-    factor: null,
+    target_draw: round(settings.targetDraw),
+    max_move: round(settings.maxMove),
+    factor: round(settings.factor),
     draw_delta: 0,
     deltas: { home: 0, draw: 0, away: 0 },
   };
   if (!ouForced || live?.active || preliminaryForced?.synthetic || !validH2h(probs)) return base;
 
   const drawProb = Number(probs.draw);
-  const targetDraw = 0.36;
-  const factor = 0.8;
-  const maxMove = 0.026;
+  const targetDraw = settings.targetDraw;
+  const factor = settings.factor;
+  const maxMove = settings.maxMove;
   const drawDelta = clamp(Math.max(0, targetDraw - drawProb) * factor, 0, maxMove);
   const applied = drawDelta >= 0.003;
   const sideTotal = Math.max(0.001, Number(probs.home || 0) + Number(probs.away || 0));
@@ -2332,6 +2367,7 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
       low_depth_over15_caution: 0,
       low_depth_over15_h2h_guard: 0,
       deep_under_tie_guard: 0,
+      central_draw_guard: 0,
       synthetic_lean: syntheticLean,
       ou_cross_market_friction: crossMarketFriction,
       edge,
@@ -2366,12 +2402,30 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
   if (ranked[0]?.market === '1X2' && topDeepUnder) {
     const gap = ranked[0].choice_score - topDeepUnder.choice_score;
     const edgeOk = topDeepUnder.edge == null || ranked[0].edge == null || Number(topDeepUnder.edge) >= Number(ranked[0].edge) - 0.001;
-    const lowConvictionH2h = Number(ranked[0].probability || 0) <= 0.505 && Number(topDeepUnder.probability || 0) >= 0.545;
-    const closeEnough = edgeOk ? gap <= 0.003 : lowConvictionH2h && gap <= 0.01;
+    const deepStandardUnder = topDeepUnder.market === 'OU_2.5' && topDeepUnder.selection === 'under';
+    const lowConvictionH2h = Number(ranked[0].probability || 0) <= (deepStandardUnder ? 0.515 : 0.505)
+      && Number(topDeepUnder.probability || 0) >= 0.545;
+    const closeEnough = edgeOk ? gap <= 0.003 : lowConvictionH2h && gap <= (deepStandardUnder ? 0.024 : 0.01);
     if (gap >= 0 && closeEnough) {
       const boost = round(gap + 0.0002);
       topDeepUnder.choice_score = round(topDeepUnder.choice_score + boost);
       topDeepUnder.choice_adjustments.deep_under_tie_guard = boost;
+      ranked = sortCandidates();
+    }
+  }
+  const centralDraw = ranked.find((candidate) => (
+    candidate.market === '1X2'
+    && candidate.selection === 'draw'
+    && Number(candidate.probability || 0) >= 0.45
+  ));
+  if (ranked[0]?.market !== '1X2' && centralDraw) {
+    const gap = ranked[0].choice_score - centralDraw.choice_score;
+    const topReliability = Number(ranked[0].choice_adjustments?.reliability || 0);
+    const topIsOu = String(ranked[0].market || '').startsWith('OU_');
+    if (topIsOu && topReliability <= 0 && gap >= 0 && gap <= 0.018) {
+      const boost = round(gap + 0.0002);
+      centralDraw.choice_score = round(centralDraw.choice_score + boost);
+      centralDraw.choice_adjustments.central_draw_guard = boost;
       ranked = sortCandidates();
     }
   }
@@ -2575,7 +2629,8 @@ function groupOpeningDrawSummary(adjustment) {
 
 function forcedOuDrawSummary(adjustment) {
   if (!adjustment?.available || !adjustment.applied) return '';
-  return ` Signal O/U dominant : le 1X2 est resserre vers le nul (+${(Number(adjustment.draw_delta || 0) * 100).toFixed(1)} pt), car ce profil a produit davantage de scores accroches.`;
+  const profile = Number(adjustment.line) === 2.5 ? 'O/U 2.5' : 'O/U';
+  return ` Signal ${profile} dominant : le 1X2 est resserre vers le nul (+${(Number(adjustment.draw_delta || 0) * 100).toFixed(1)} pt), car ce profil a produit davantage de scores accroches.`;
 }
 
 function summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, strongFavoriteDrawFloorGuard, groupOpeningDrawAdjustment, forcedOuDrawAdjustment) {
@@ -3050,7 +3105,7 @@ export function generateCodexOpinion(db, matchId) {
   const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, strongFavoriteDrawFloorGuard, groupOpeningDrawAdjustment, forcedOuDrawAdjustment);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_group_opening_forced_ou_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_knockout90_power_rating_regime_draw_guard_group_opening_forced_ou_calibrated`,
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_group_opening_forced_ou_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_knockout90_power_rating_regime_draw_guard_group_opening_forced_ou_line_calibrated`,
     h2h_books: market?.books || 0,
     prior: prior.context,
     market_movement: marketMovement,

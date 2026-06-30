@@ -81,13 +81,13 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v31');
+  assert.equal(opinion.model_version, 'codex-book-v32');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_group_opening_forced_ou_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_power_rating_regime_draw_guard_group_opening_forced_ou_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -122,7 +122,39 @@ test('generateCodexOpinion : ne rehausse pas le nul groupe apres la premiere jou
   assert.doesNotMatch(opinion.summary, /Premier match de groupe/);
 });
 
-test('generateCodexOpinion : resserre le 1X2 vers le nul quand le signal initial est O/U', () => {
+test('generateCodexOpinion : resserre le 1X2 vers le nul quand le signal initial est O/U 2.5', () => {
+  const db = freshDb();
+  db.prepare('UPDATE matches SET matchday = 2 WHERE id = 1').run();
+  for (const bookmaker of ['book-a', 'book-b']) {
+    for (const [outcome, price] of [['home', 2.55], ['draw', 3.35], ['away', 2.90]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+    for (const [side, price] of [['over', 3.10], ['under', 1.42]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, point, price, taken_at)
+        VALUES (1, @bookmaker, 'totals', @outcome, 2.5, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome: `${side}_2.5`, price });
+    }
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const adjustment = opinion.diagnostics.forced_ou_draw_adjustment;
+
+  assert.equal(opinion.diagnostics.forced_choice.preliminary_market, 'OU_2.5');
+  assert.equal(adjustment.available, true);
+  assert.equal(adjustment.applied, true);
+  assert.equal(adjustment.preliminary_market, 'OU_2.5');
+  assert.equal(adjustment.line, 2.5);
+  assert.equal(adjustment.profile, 'standard_total_2_5');
+  assert.ok(adjustment.draw_delta > 0.026);
+  assert.ok(opinion.probabilities.draw > adjustment.draw_prob);
+  assert.match(opinion.summary, /Signal O\/U 2\.5 dominant/);
+});
+
+test('generateCodexOpinion : garde un boost nul modere sur le signal O/U 1.5', () => {
   const db = freshDb();
   db.prepare('UPDATE matches SET matchday = 2 WHERE id = 1').run();
   for (const bookmaker of ['book-a', 'book-b']) {
@@ -146,9 +178,10 @@ test('generateCodexOpinion : resserre le 1X2 vers le nul quand le signal initial
   assert.equal(opinion.diagnostics.forced_choice.preliminary_market, 'OU_1.5');
   assert.equal(adjustment.available, true);
   assert.equal(adjustment.applied, true);
-  assert.equal(adjustment.preliminary_market, 'OU_1.5');
+  assert.equal(adjustment.line, 1.5);
+  assert.equal(adjustment.profile, 'low_total_1_5_moderate_draw_boost');
   assert.ok(adjustment.draw_delta > 0);
-  assert.ok(opinion.probabilities.draw > adjustment.draw_prob);
+  assert.ok(adjustment.draw_delta <= 0.026);
   assert.match(opinion.summary, /Signal O\/U dominant/);
 });
 
