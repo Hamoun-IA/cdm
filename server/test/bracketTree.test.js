@@ -73,6 +73,7 @@ test('buildTree : aligne les 8es sur leurs vrais vainqueurs entrants', () => {
 
   assert.deepEqual(leftR32, [74, 77, 73, 75, 83, 84, 81, 82]);
   assert.deepEqual(rightR32, [76, 78, 79, 80, 86, 88, 85, 87]);
+  assert.deepEqual(leftR32.slice(0, 2), [74, 77]);
   assert.notDeepEqual(leftR32.slice(0, 2), [73, 74]);
   assert.equal(tree.labels.find((label) => label.key === 'l-r32')?.count, '8 matchs');
 
@@ -90,6 +91,7 @@ test('buildTree : aligne les 8es sur leurs vrais vainqueurs entrants', () => {
   });
 
   assert.equal(tree.lines.some((line) => line.key.startsWith('73-89-')), false);
+  assert.notEqual(centerY(matchNode(tree, 89)), (centerY(matchNode(tree, 73)) + centerY(matchNode(tree, 74))) / 2);
 });
 
 test('buildTree : conserve l ordre officiel de branche meme si les dependances amont changent d ordre', () => {
