@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v20';
+const MODEL_VERSION = 'codex-book-v21';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -1908,6 +1908,18 @@ function marketDepthAdjustment(candidate) {
   return 0;
 }
 
+function lowDepthOver15Caution(candidate, totals) {
+  if (candidate.market !== 'OU_1.5' || candidate.selection !== 'over' || candidate.synthetic) return 0;
+  if (Number(candidate.source_books || 0) >= 3) return 0;
+  const probability = Number(candidate.probability);
+  if (!Number.isFinite(probability) || probability >= 0.68) return 0;
+  const mainLine = totals.find((line) => Number(line.line) === 2.5 && !line.synthetic);
+  if (!mainLine || mainLine.lean !== 'under' || Number(mainLine.books || 0) < 8) return 0;
+  const mainOver = Number(mainLine.probs?.over);
+  if (!Number.isFinite(mainOver) || mainOver > 0.48) return 0;
+  return -0.045;
+}
+
 function syntheticLeanAdjustment(candidate) {
   if (candidate.market === '1X2' || !candidate.synthetic) return 0;
   const probability = Number(candidate.probability);
@@ -1980,17 +1992,31 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
       exact_market_reliability: exactMarketReliability,
       exact_pick_reliability: exactPickReliability,
       depth,
+      low_depth_over15_caution: 0,
+      low_depth_over15_h2h_guard: 0,
       synthetic_lean: syntheticLean,
       edge,
     };
   }
-  const ranked = candidates.sort((a, b) => {
+  const sortCandidates = () => candidates.sort((a, b) => {
     const byScore = b.choice_score - a.choice_score;
     if (Math.abs(byScore) > 0.0001) return byScore;
     const byProbability = b.probability - a.probability;
     if (Math.abs(byProbability) > 0.0001) return byProbability;
     return (b.edge ?? -Infinity) - (a.edge ?? -Infinity);
   });
+  let ranked = sortCandidates();
+  const lowDepthOver15 = lowDepthOver15Caution(ranked[0], totals);
+  const topH2h = ranked.find((candidate) => candidate.market === '1X2');
+  const h2hGap = topH2h ? ranked[0].choice_score - topH2h.choice_score : null;
+  if (lowDepthOver15 < 0 && topH2h && h2hGap >= 0 && h2hGap <= Math.abs(lowDepthOver15)) {
+    ranked[0].choice_score = round(ranked[0].choice_score + lowDepthOver15);
+    ranked[0].choice_adjustments.low_depth_over15_caution = lowDepthOver15;
+    const h2hGuard = round(h2hGap + 0.0002);
+    topH2h.choice_score = round(topH2h.choice_score + h2hGuard);
+    topH2h.choice_adjustments.low_depth_over15_h2h_guard = h2hGuard;
+    ranked = sortCandidates();
+  }
   ranked[0].alternatives = ranked.slice(1, 5).map(forcedCandidateDiagnostic);
   return ranked[0];
 }

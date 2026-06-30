@@ -81,7 +81,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v20');
+  assert.equal(opinion.model_version, 'codex-book-v21');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -140,6 +140,46 @@ test('generateCodexOpinion : amortit les lignes Over Under peu profondes', () =>
   assert.ok(line.probs.over < 0.72);
   assert.ok(line.probs.over > 0.6);
   assert.match(opinion.summary, /peu profondes/);
+});
+
+test('generateCodexOpinion : se mefie dun Over 1.5 peu profond quand la ligne 2.5 reste Under', () => {
+  const db = freshDb();
+  for (const [bookmaker, home, draw, away] of [
+    ['book-a', 1.83, 3.95, 5.50],
+    ['book-b', 1.86, 3.90, 5.30],
+  ]) {
+    for (const [outcome, price] of [['home', home], ['draw', draw], ['away', away]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+  }
+  for (const [side, price] of [['over', 1.35], ['under', 3.10]]) {
+    db.prepare(`
+      INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, point, price, taken_at)
+      VALUES (1, 'thin-book', 'totals', @outcome, 1.5, @price, '2026-06-11T08:00:00Z')
+    `).run({ outcome: `${side}_1.5`, price });
+  }
+  for (let i = 1; i <= 10; i++) {
+    for (const [side, price] of [['over', 2.10], ['under', 1.85]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, point, price, taken_at)
+        VALUES (1, @bookmaker, 'totals', @outcome, 2.5, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker: `deep-book-${i}`, outcome: `${side}_2.5`, price });
+    }
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const candidates = [opinion.diagnostics.forced_choice, ...opinion.diagnostics.forced_choice.alternatives];
+  const over15Candidate = candidates.find((candidate) => (
+    candidate.market === 'OU_1.5' && candidate.selection === 'over'
+  ));
+
+  assert.equal(opinion.forced_pick_market, '1X2');
+  assert.equal(opinion.forced_pick_selection, 'home');
+  assert.ok(opinion.diagnostics.forced_choice.choice_adjustments.low_depth_over15_h2h_guard > 0);
+  assert.ok(over15Candidate.choice_adjustments.low_depth_over15_caution < 0);
 });
 
 test('generateCodexOpinion : ajuste les buts avec le rythme réel du tournoi', () => {
