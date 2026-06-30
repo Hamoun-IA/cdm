@@ -335,7 +335,7 @@ test('generateCodexOpinion : se mefie dun Over 1.5 peu profond quand la ligne 2.
   assert.equal(opinion.forced_pick_market, '1X2');
   assert.equal(opinion.forced_pick_selection, 'home');
   assert.ok(opinion.diagnostics.forced_choice.choice_adjustments.low_depth_over15_h2h_guard > 0);
-  assert.ok(over15Candidate.choice_adjustments.low_depth_over15_caution < 0);
+  assert.ok(over15Candidate.choice_adjustments.low_depth_over15_caution <= -0.08);
 });
 
 test('generateCodexOpinion : favorise le 1X2 quand l O/U est seulement legerement meilleur', () => {
@@ -793,6 +793,7 @@ test('generateCodexOpinion : rehausse le nul des favoris forts meme en groupe', 
   assert.equal(guard.favorite, 'home');
   assert.equal(guard.home_slot_draw_memory, true);
   assert.equal(guard.target_draw, 0.42);
+  assert.equal(guard.max_move, 0.18);
   assert.ok(guard.draw_delta > 0.04);
   assert.ok(opinion.probabilities.draw >= 0.20);
   assert.ok(opinion.probabilities.home < 0.74);
