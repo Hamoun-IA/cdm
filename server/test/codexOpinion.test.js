@@ -67,7 +67,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v14');
+  assert.equal(opinion.model_version, 'codex-book-v15');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -465,6 +465,48 @@ test('generateCodexOpinion : applique une calibration par régime quand le biais
   assert.ok(opinion.diagnostics.regime_calibration.deltas.draw > 0);
   assert.ok(opinion.probabilities.draw > 0.33);
   assert.match(opinion.summary, /Calibration par régime active/);
+});
+
+test('generateCodexOpinion : applique le régime match ouvert avant un favori trop générique', () => {
+  const db = freshDb();
+  for (let id = 2; id <= 5; id++) {
+    insertFinishedMatch(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      homeScore: 1,
+      awayScore: 1,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-10T00:00:00Z',
+      modelVersion: 'codex-book-v14',
+      probabilities: { home: 0.42, draw: 0.31, away: 0.27 },
+      forcedSelection: 'home',
+    });
+  }
+  for (let id = 6; id <= 9; id++) {
+    insertFinishedMatch(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      homeScore: 1,
+      awayScore: 1,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-10T00:00:00Z',
+      modelVersion: 'codex-book-v14',
+      probabilities: { home: 0.27, draw: 0.31, away: 0.42 },
+      forcedMarket: '1X2',
+      forcedSelection: 'away',
+    });
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+
+  assert.equal(opinion.diagnostics.regime_calibration.key, 'confidence:open');
+  assert.ok(opinion.diagnostics.regime_calibration.deltas.draw > 0);
+  assert.ok(opinion.diagnostics.regime_calibration.max_move <= 0.018);
+  assert.ok(opinion.probabilities.draw > 0.31);
 });
 
 test('generateCodexOpinion : calibre les lignes Over Under par ligne standard', () => {

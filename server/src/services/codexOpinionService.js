@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v14';
+const MODEL_VERSION = 'codex-book-v15';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -453,9 +453,14 @@ function regimeCalibrationLabel(key) {
 
 function regimeCalibrationCandidates(probs) {
   const regime = h2hRegime(probs);
+  const openConfidence = regime.confidence === 'open';
   return [
     { key: `favorite_confidence:${regime.favorite}:${regime.confidence}`, min_effective_n: 6, max_move: 0.026 },
-    { key: `confidence:${regime.confidence}`, min_effective_n: 7, max_move: 0.023 },
+    {
+      key: `confidence:${regime.confidence}`,
+      min_effective_n: openConfidence ? 5 : 7,
+      max_move: openConfidence ? 0.018 : 0.023,
+    },
     { key: `favorite:${regime.favorite}`, min_effective_n: 9, max_move: 0.02 },
   ];
 }
