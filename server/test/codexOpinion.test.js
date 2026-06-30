@@ -126,6 +126,7 @@ test('generateCodexOpinion : rehausse prudemment le nul des premiers matchs de g
   assert.equal(adjustment.matchday, 1);
   assert.ok(adjustment.draw_delta > 0);
   assert.ok(opinion.probabilities.draw > adjustment.draw_prob);
+  assert.ok(opinion.diagnostics.confidence_context.adjustments.some((a) => a.key === 'opening_group_no_team_form'));
   assert.match(opinion.summary, /Premier match de groupe/);
 });
 

@@ -10,7 +10,8 @@
     "seed": "node src/seed.js",
     "backup": "node src/backup.js",
     "backup:loop": "node src/backup.js --loop",
-    "test": "node --test"
+    "test": "node --test",
+    "replay:codex": "node src/tools/replayCodexOpinion.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.0",
