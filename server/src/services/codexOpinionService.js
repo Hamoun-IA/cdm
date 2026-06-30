@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v33';
+const MODEL_VERSION = 'codex-book-v34';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -682,15 +682,15 @@ function awayFavoriteDrawCompressionPlan(probs, calibration, hasMarket) {
 
   const sampleWeight = effectiveN / (effectiveN + 12);
   const marketScale = hasMarket ? 1 : 0.72;
-  const biasDelta = Math.max(0, Math.abs(drawBias) - 0.025) * sampleWeight * marketScale * 0.68;
-  const maxMove = hasMarket ? 0.034 : 0.022;
+  const biasDelta = Math.max(0, Math.abs(drawBias) - 0.025) * sampleWeight * marketScale * 2.0;
+  const maxMove = hasMarket ? 0.12 : 0.075;
   const drawDelta = clamp(biasDelta, 0, maxMove);
   const applied = drawDelta >= 0.0035;
   const deltas = { home: 0, draw: 0, away: 0 };
   if (applied) {
     deltas.draw = round(-drawDelta);
-    deltas.away = round(drawDelta * 0.82);
-    deltas.home = round(drawDelta * 0.18);
+    deltas.away = round(drawDelta * 0.3);
+    deltas.home = round(drawDelta * 0.7);
   }
 
   return {
@@ -1802,7 +1802,7 @@ function h2hMarketMovementAdjustmentPlan(movement, calibration = null) {
     && Number(movement.delta.draw || 0) <= 0
     && Number(movement.delta.away || 0) < 0
   ) {
-    const fallbackDelta = clamp((Number(movement.max_delta) - 0.018) * depth * 0.42, 0, 0.012);
+    const fallbackDelta = clamp((Number(movement.max_delta) - 0.018) * depth * 0.55, 0, 0.018);
     const regimes = calibration?.h2h_regimes || {};
     const sourceKey = regimes['market_movement:home:strong_draw_caution']
       ? 'market_movement:home:strong_draw_caution'
@@ -1811,12 +1811,12 @@ function h2hMarketMovementAdjustmentPlan(movement, calibration = null) {
     const effectiveN = Number(source?.effective_n || 0);
     const drawBias = Number(source?.bias?.draw || 0);
     const sampleWeight = effectiveN / (effectiveN + 9);
-    const calibratedCap = effectiveN >= 7 ? 0.052 : effectiveN >= 4.5 ? 0.038 : 0.024;
+    const calibratedCap = effectiveN >= 7 ? 0.068 : effectiveN >= 4.5 ? 0.05 : 0.03;
     const calibratedDelta = effectiveN >= 2.5 && drawBias >= 0.08
-      ? clamp((drawBias - 0.03) * sampleWeight * 0.72, 0, calibratedCap)
+      ? clamp((drawBias - 0.03) * sampleWeight * 0.88, 0, calibratedCap)
       : 0;
-    const pressureDelta = clamp((Number(movement.max_delta) - 0.025) * depth * 0.15, 0, 0.008);
-    const drawDelta = round(clamp(Math.max(fallbackDelta, calibratedDelta + pressureDelta), 0, 0.056));
+    const pressureDelta = clamp((Number(movement.max_delta) - 0.025) * depth * 0.22, 0, 0.014);
+    const drawDelta = round(clamp(Math.max(fallbackDelta, calibratedDelta + pressureDelta), 0, 0.078));
     if (drawDelta >= 0.002) {
       deltas.home = round(deltas.home - drawDelta * 0.72);
       deltas.draw = round(deltas.draw + drawDelta);

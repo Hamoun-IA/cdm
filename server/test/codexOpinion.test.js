@@ -81,7 +81,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v33');
+  assert.equal(opinion.model_version, 'codex-book-v34');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -1172,8 +1172,10 @@ test('generateCodexOpinion : compresse le nul des favoris exterieurs moderes fia
   assert.equal(compression.available, true);
   assert.equal(compression.applied, true);
   assert.equal(compression.source_key, 'favorite_confidence:away:medium');
+  assert.equal(compression.max_move, 0.12);
   assert.ok(compression.draw_delta < 0);
   assert.ok(compression.deltas.away > 0);
+  assert.ok(compression.deltas.home > compression.deltas.away);
   assert.ok(opinion.probabilities.draw < compression.draw_prob);
   assert.match(opinion.summary, /Memoire favoris exterieurs/);
 });
@@ -1269,6 +1271,7 @@ test('generateCodexOpinion : apprend les steam home historiques qui finissent en
   assert.equal(adjustment.applied, true);
   assert.equal(adjustment.source_key, 'market_movement:home:strong_draw_caution');
   assert.ok(adjustment.calibrated_delta > adjustment.fallback_delta);
+  assert.ok(adjustment.pressure_delta > 0);
   assert.ok(opinion.probabilities.draw - baseline.probabilities.draw > 0.018);
 });
 
