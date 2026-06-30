@@ -81,7 +81,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v46');
+  assert.equal(opinion.model_version, 'codex-book-v47');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -530,6 +530,29 @@ test('generateCodexOpinion : protege un plancher de nul 90 min KO apres calibrat
   assert.ok(opinion.probabilities.draw >= 0.22);
   assert.ok(opinion.probabilities.home < 0.73);
   assert.match(opinion.summary, /Plancher KO 90 min/);
+});
+
+test('generateCodexOpinion : force le nul KO quand il suit de pres un favori modere', () => {
+  const db = freshDb();
+  db.prepare("UPDATE matches SET stage = 'R32', group_code = NULL, matchday = NULL WHERE id = 1").run();
+  for (const bookmaker of ['book-a', 'book-b', 'book-c']) {
+    for (const [outcome, price] of [['home', 1.72], ['draw', 2.75], ['away', 18.0]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const candidates = [opinion.diagnostics.forced_choice, ...opinion.diagnostics.forced_choice.alternatives];
+  const drawCandidate = candidates.find((candidate) => candidate.market === '1X2' && candidate.selection === 'draw');
+
+  assert.equal(opinion.forced_pick_market, '1X2');
+  assert.equal(opinion.forced_pick_selection, 'draw');
+  assert.ok(opinion.probabilities.home >= 0.54);
+  assert.ok(opinion.probabilities.draw >= 0.35);
+  assert.ok(drawCandidate.choice_adjustments.knockout_side_draw_guard > 0);
 });
 
 test('generateCodexOpinion : rehausse le nul des favoris forts meme en groupe', () => {
