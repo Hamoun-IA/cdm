@@ -206,6 +206,49 @@ test('generateCodexOpinion : force le nul J1 sur favori domicile compresse et nu
   assert.ok(forced.choice_adjustments.opening_home_draw_position_guard > 0);
 });
 
+test('generateCodexOpinion : calibre la confiance quand le choix force historique etait sous-cote', () => {
+  const db = freshDb();
+  for (let id = 2; id <= 13; id += 1) {
+    insertFinishedMatch(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      homeScore: 1,
+      awayScore: 0,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-10T00:00:00Z',
+      modelVersion: 'codex-book-v60',
+      probabilities: { home: 0.58, draw: 0.28, away: 0.14 },
+      totals: [],
+      forcedMarket: '1X2',
+      forcedSelection: 'home',
+      confidenceScore: 45,
+    });
+  }
+  for (const bookmaker of ['book-a', 'book-b']) {
+    for (const [outcome, price] of [['home', 1.64], ['draw', 3.70], ['away', 8.00]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+    for (const [side, price] of [['over', 2.23], ['under', 1.76]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, point, price, taken_at)
+        VALUES (1, @bookmaker, 'totals', @outcome, 2.5, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome: `${side}_2.5`, price });
+    }
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const confidenceContext = opinion.diagnostics.confidence_context;
+
+  assert.ok(opinion.diagnostics.calibration.forced.confidence_gap > 0.4);
+  assert.ok(confidenceContext.adjustments.some((item) => item.key === 'forced_history_underconfidence'));
+  assert.ok(opinion.confidence_score >= 50);
+});
+
 test('generateCodexOpinion : force le nul J2 entre deux vainqueurs avec favori domicile tres bas cote', () => {
   const db = freshDb();
   db.prepare("UPDATE matches SET matchday = 2, kickoff_utc = '2026-06-15T19:00:00Z' WHERE id = 1").run();
@@ -2714,6 +2757,7 @@ function insertHistoricalOpinion(db, {
   totals = [{ line: 2.5, probs: { over: 0.7, under: 0.3 }, fair_odds: { over: 1.43, under: 3.33 }, synthetic: false }],
   forcedMarket = '1X2',
   forcedSelection = 'away',
+  confidenceScore = 50,
   modelVersion = 'codex-book-v1',
   diagnostics = {},
 } = {}) {
@@ -2725,7 +2769,7 @@ function insertHistoricalOpinion(db, {
     )
     VALUES (
       @match_id, NULL, @model_version, @input_hash, 'Historique test', 'Historique test',
-      @forced_pick_market, @forced_pick_selection, @forced_pick_label, 50,
+      @forced_pick_market, @forced_pick_selection, @forced_pick_label, @confidence_score,
       @probabilities_json, '{}', @totals_json, @diagnostics_json, 'Historique test', @generated_at
     )
   `).run({
@@ -2735,6 +2779,7 @@ function insertHistoricalOpinion(db, {
     forced_pick_market: forcedMarket,
     forced_pick_selection: forcedSelection,
     forced_pick_label: forcedSelection,
+    confidence_score: confidenceScore,
     probabilities_json: JSON.stringify(probabilities),
     totals_json: JSON.stringify(totals),
     diagnostics_json: JSON.stringify(diagnostics),

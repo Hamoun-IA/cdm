@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v61';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v62';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -325,6 +325,10 @@ function finalizedForcedBuckets(buckets) {
   ]));
 }
 
+function forcedConfidenceGap(hitRate, avgConfidence) {
+  return hitRate == null || avgConfidence == null ? null : round(hitRate - (avgConfidence / 100));
+}
+
 function hasTournamentChoiceGuard(diagnostics) {
   const adjustments = diagnostics?.forced_choice?.choice_adjustments || {};
   return [
@@ -355,6 +359,21 @@ function forcedCalibrationPick(row, diagnostics) {
   };
 }
 
+function forcedVerdictForPick(row, pick) {
+  const actual = actualH2hOutcome(row);
+  if (pick?.market === '1X2' && H2H_OUTCOMES.includes(pick.selection)) {
+    return pick.selection === actual ? 'hit' : 'miss';
+  }
+  const m = String(pick?.market || '').match(/^OU_(\d+(?:\.\d+)?)$/);
+  const goals = actualGoals(row);
+  if (m && Number.isFinite(goals)) {
+    const line = Number(m[1]);
+    const forcedActual = goals > line ? 'over' : goals < line ? 'under' : null;
+    if (forcedActual) return pick.selection === forcedActual ? 'hit' : 'miss';
+  }
+  return null;
+}
+
 function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
   const rows = latestPrematchCodexOpinions(db, excludedMatchId, cutoffUtc);
   const h2hPred = { home: 0, draw: 0, away: 0 };
@@ -369,6 +388,14 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
   let forcedHits = 0;
   let forcedEffectiveN = 0;
   let forcedHitWeight = 0;
+  let forcedConfidence = 0;
+  let forcedConfidenceWeight = 0;
+  let finalForcedN = 0;
+  let finalForcedHits = 0;
+  let finalForcedEffectiveN = 0;
+  let finalForcedHitWeight = 0;
+  let finalForcedConfidence = 0;
+  let finalForcedConfidenceWeight = 0;
   const forcedBuckets = {
     '1X2': emptyForcedBucket(),
     OU: emptyForcedBucket(),
@@ -418,29 +445,42 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
       }
     }
 
-    let forcedVerdict = null;
     const calibrationPick = forcedCalibrationPick(row, diagnostics);
-    if (calibrationPick.market === '1X2' && H2H_OUTCOMES.includes(calibrationPick.selection)) {
-      forcedVerdict = calibrationPick.selection === actual ? 'hit' : 'miss';
-    } else {
-      const m = String(calibrationPick.market || '').match(/^OU_(\d+(?:\.\d+)?)$/);
-      const goals = actualGoals(row);
-      if (m && Number.isFinite(goals)) {
-        const line = Number(m[1]);
-        const forcedActual = goals > line ? 'over' : goals < line ? 'under' : null;
-        if (forcedActual) forcedVerdict = calibrationPick.selection === forcedActual ? 'hit' : 'miss';
-      }
-    }
+    const forcedVerdict = forcedVerdictForPick(row, calibrationPick);
     if (forcedVerdict && isStandardForcedMarket(calibrationPick.market)) {
       const bucketKey = forcedMarketBucket(calibrationPick.market);
       forcedN += 1;
       forcedEffectiveN += rowWeight;
+      const confidenceScore = Number(row.confidence_score);
+      if (Number.isFinite(confidenceScore)) {
+        forcedConfidence += confidenceScore * rowWeight;
+        forcedConfidenceWeight += rowWeight;
+      }
       addForcedSample(forcedBuckets, bucketKey, forcedVerdict, rowWeight);
       addForcedSample(forcedExactMarketBuckets, forcedExactMarket(calibrationPick.market), forcedVerdict, rowWeight);
       addForcedSample(forcedExactPickBuckets, forcedExactPick(calibrationPick.market, calibrationPick.selection), forcedVerdict, rowWeight);
       if (forcedVerdict === 'hit') {
         forcedHits += 1;
         forcedHitWeight += rowWeight;
+      }
+    }
+
+    const finalPick = {
+      market: row.forced_pick_market,
+      selection: row.forced_pick_selection,
+    };
+    const finalForcedVerdict = forcedVerdictForPick(row, finalPick);
+    if (finalForcedVerdict && isStandardForcedMarket(finalPick.market)) {
+      finalForcedN += 1;
+      finalForcedEffectiveN += rowWeight;
+      const confidenceScore = Number(row.confidence_score);
+      if (Number.isFinite(confidenceScore)) {
+        finalForcedConfidence += confidenceScore * rowWeight;
+        finalForcedConfidenceWeight += rowWeight;
+      }
+      if (finalForcedVerdict === 'hit') {
+        finalForcedHits += 1;
+        finalForcedHitWeight += rowWeight;
       }
     }
 
@@ -476,6 +516,10 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
   const forcedByMarket = finalizedForcedBuckets(forcedBuckets);
   const forcedByExactMarket = finalizedForcedBuckets(forcedExactMarketBuckets);
   const forcedByExactPick = finalizedForcedBuckets(forcedExactPickBuckets);
+  const forcedHitRate = forcedEffectiveN ? round(forcedHitWeight / forcedEffectiveN) : null;
+  const forcedAvgConfidence = forcedConfidenceWeight ? round(forcedConfidence / forcedConfidenceWeight) : null;
+  const finalForcedHitRate = finalForcedEffectiveN ? round(finalForcedHitWeight / finalForcedEffectiveN) : null;
+  const finalForcedAvgConfidence = finalForcedConfidenceWeight ? round(finalForcedConfidence / finalForcedConfidenceWeight) : null;
 
   return {
     available: h2hN > 0 || totalsN > 0,
@@ -504,8 +548,16 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
     forced: {
       n: forcedN,
       effective_n: round(forcedEffectiveN, 2),
-      hit_rate: forcedEffectiveN ? round(forcedHitWeight / forcedEffectiveN) : null,
+      hit_rate: forcedHitRate,
       raw_hit_rate: forcedN ? round(forcedHits / forcedN) : null,
+      avg_confidence: forcedAvgConfidence,
+      confidence_gap: forcedConfidenceGap(forcedHitRate, forcedAvgConfidence),
+      final_n: finalForcedN,
+      final_effective_n: round(finalForcedEffectiveN, 2),
+      final_hit_rate: finalForcedHitRate,
+      final_raw_hit_rate: finalForcedN ? round(finalForcedHits / finalForcedN) : null,
+      final_avg_confidence: finalForcedAvgConfidence,
+      final_confidence_gap: forcedConfidenceGap(finalForcedHitRate, finalForcedAvgConfidence),
       by_market: forcedByMarket,
       by_exact_market: forcedByExactMarket,
       by_exact_pick: forcedByExactPick,
@@ -3699,6 +3751,28 @@ function confidenceDetails({ match, market, totals, intel, scorecard, previous, 
     if (calibration.forced.hit_rate < 0.45) c -= 5;
     else if (calibration.forced.hit_rate >= 0.6) c += 2;
   }
+  if (!live?.active && calibration?.forced?.final_effective_n >= 8 && calibration.forced.final_confidence_gap != null) {
+    const confidenceGap = Number(calibration.forced.final_confidence_gap);
+    const hitRate = Number(calibration.forced.final_hit_rate);
+    const sampleWeight = Number(calibration.forced.final_effective_n) / (Number(calibration.forced.final_effective_n) + 14);
+    if (Number.isFinite(confidenceGap) && Number.isFinite(hitRate) && confidenceGap >= 0.12 && hitRate >= 0.62) {
+      const bonus = Math.round(clamp((confidenceGap - 0.08) * 18 * sampleWeight, 1, 7));
+      adjust('forced_history_underconfidence', bonus, {
+        hit_rate: round(hitRate),
+        avg_confidence: calibration.forced.final_avg_confidence,
+        confidence_gap: round(confidenceGap),
+        effective_n: calibration.forced.final_effective_n,
+      });
+    } else if (Number.isFinite(confidenceGap) && confidenceGap <= -0.12) {
+      const penalty = -Math.round(clamp((Math.abs(confidenceGap) - 0.08) * 18 * sampleWeight, 1, 7));
+      adjust('forced_history_overconfidence', penalty, {
+        hit_rate: Number.isFinite(hitRate) ? round(hitRate) : null,
+        avg_confidence: calibration.forced.final_avg_confidence,
+        confidence_gap: round(confidenceGap),
+        effective_n: calibration.forced.final_effective_n,
+      });
+    }
+  }
   if (teamForm?.available) c += teamForm.home.played && teamForm.away.played ? 3 : 1;
   else if (match?.stage === 'GROUP' && Number(match?.matchday) === 1 && !live?.active) {
     adjust('opening_group_no_team_form', -5, { stage: match.stage, matchday: match.matchday });
@@ -4590,6 +4664,11 @@ export function generateCodexOpinion(db, matchId) {
         n: calibration.forced.n,
         effective_n: calibration.forced.effective_n,
         hit_rate: calibration.forced.hit_rate,
+        avg_confidence: calibration.forced.avg_confidence,
+        confidence_gap: calibration.forced.confidence_gap,
+        final_hit_rate: calibration.forced.final_hit_rate,
+        final_avg_confidence: calibration.forced.final_avg_confidence,
+        final_confidence_gap: calibration.forced.final_confidence_gap,
         by_market: calibration.forced.by_market,
         by_exact_market: calibration.forced.by_exact_market,
         by_exact_pick: calibration.forced.by_exact_pick,
