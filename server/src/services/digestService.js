@@ -43,6 +43,7 @@ function compactAuditMetric(metric) {
     favorite_hit_rate: metric.favorite_hit_rate,
     average_brier: metric.average_brier,
     avg_confidence: metric.avg_confidence,
+    confidence_gap: metric.confidence_gap,
     correct_count: metric.correct_count,
     incorrect_count: metric.incorrect_count,
     neutral_count: metric.neutral_count,

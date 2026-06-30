@@ -4257,18 +4257,21 @@ function auditMetric(label, opinions) {
   const pushes = counted.filter((opinion) => opinion.evaluation.verdict === 'push').length;
   const decisive = hits + misses;
   const favorites = counted.filter((opinion) => opinion.evaluation.favorite_hit != null);
+  const hitRate = decisive ? round(hits / decisive) : null;
+  const avgConfidence = mean(counted.map((opinion) => opinion.confidence_score));
   return {
     key: label,
     n: counted.length,
     correct_count: hits,
     incorrect_count: misses,
     neutral_count: pushes,
-    hit_rate: decisive ? round(hits / decisive) : null,
+    hit_rate: hitRate,
     favorite_hit_rate: favorites.length
       ? round(favorites.filter((opinion) => opinion.evaluation.favorite_hit).length / favorites.length)
       : null,
     average_brier: mean(counted.map((opinion) => opinion.evaluation.brier_score)),
-    avg_confidence: mean(counted.map((opinion) => opinion.confidence_score)),
+    avg_confidence: avgConfidence,
+    confidence_gap: hitRate == null || avgConfidence == null ? null : round(hitRate - (avgConfidence / 100)),
   };
 }
 

@@ -70,6 +70,7 @@ test('digestToday : expose les zones faibles Avis Codex aux agents', () => {
   assert.equal(d.codex_audit.sample.n, 3);
   assert.equal(weakOu.n, 3);
   assert.equal(weakOu.hit_rate, 0);
+  assert.equal(weakOu.confidence_gap, -0.42);
   assert.equal(d.codex_audit.probability_alerts.length, 3);
   assert.match(d.codex_audit.probability_alerts[0].match_label, /Alpha - Beta/);
   assert.ok(d.codex_audit.investigation_focus.some((item) => item.includes('OU_2.5') && item.includes('rythme')));

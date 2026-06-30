@@ -654,7 +654,7 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
 .codex-audit-head,
 .codex-audit-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) 2.1rem 3rem 3.4rem 3rem;
+  grid-template-columns: minmax(0, 1.25fr) 2.1rem 3rem 3.4rem 3rem 3.5rem;
   gap: .4rem;
   align-items: center;
   padding: .42rem .55rem;
@@ -732,7 +732,7 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
   }
   .codex-audit-head,
   .codex-audit-row {
-    grid-template-columns: minmax(0, 1fr) 2rem 2.8rem 3.2rem 2.8rem;
+    grid-template-columns: minmax(0, 1fr) 2rem 2.7rem 3rem 2.7rem 3.1rem;
   }
   .codex-proba-head,
   .codex-proba-row {

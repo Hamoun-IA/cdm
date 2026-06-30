@@ -931,6 +931,7 @@ test('codexOpinionHistory : rassemble les avis termines et compte seulement le p
   assert.equal(history.summary.hit_rate, 1);
   assert.equal(history.audit.latest_prematch.n, 1);
   assert.equal(history.audit.latest_prematch.hit_rate, 1);
+  assert.equal(history.audit.latest_prematch.confidence_gap, 0.5);
   assert.equal(history.audit.by_market[0].key, '1X2');
   assert.equal(history.audit.by_stage[0].key, 'Groupe J1');
   assert.equal(history.audit.by_confidence[0].key, 'Confiance moyenne');

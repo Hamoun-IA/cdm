@@ -19,6 +19,12 @@ function ratioLabel(value) {
   return value == null ? '—' : fmtPct(value, 0);
 }
 
+function pointGapLabel(value) {
+  if (value == null) return 'n/a';
+  const points = Math.round(Number(value) * 100);
+  return `${points > 0 ? '+' : ''}${points} pts`;
+}
+
 function matchScore(match) {
   return match.home_score == null || match.away_score == null ? 'n/a' : `${match.home_score}-${match.away_score}`;
 }
@@ -45,6 +51,7 @@ function AuditTable({ title, rows = [] }) {
           <span>Hit</span>
           <span>Brier</span>
           <span>Conf.</span>
+          <span>Écart</span>
         </div>
         {rows.map((row) => (
           <div className="codex-audit-row" key={`${title}-${row.key}`}>
@@ -53,6 +60,7 @@ function AuditTable({ title, rows = [] }) {
             <span className="num">{ratioLabel(row.hit_rate)}</span>
             <span className="num">{row.average_brier == null ? 'n/a' : Number(row.average_brier).toFixed(3)}</span>
             <span className="num">{row.avg_confidence == null ? 'n/a' : Math.round(Number(row.avg_confidence))}</span>
+            <span className="num">{pointGapLabel(row.confidence_gap)}</span>
           </div>
         ))}
       </div>
