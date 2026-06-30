@@ -81,7 +81,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v22');
+  assert.equal(opinion.model_version, 'codex-book-v23');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -366,6 +366,32 @@ test('generateCodexOpinion : protege un plancher de nul 90 min KO apres calibrat
   assert.ok(opinion.probabilities.draw >= 0.22);
   assert.ok(opinion.probabilities.home < 0.73);
   assert.match(opinion.summary, /Plancher KO 90 min/);
+});
+
+test('generateCodexOpinion : rehausse le nul des favoris forts meme en groupe', () => {
+  const db = freshDb();
+  for (const [bookmaker, home, draw, away] of [
+    ['book-a', 1.24, 6.00, 14.00],
+    ['book-b', 1.26, 5.80, 13.00],
+  ]) {
+    for (const [outcome, price] of [['home', home], ['draw', draw], ['away', away]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const guard = opinion.diagnostics.strong_favorite_draw_floor_guard;
+
+  assert.equal(guard.available, true);
+  assert.equal(guard.applied, true);
+  assert.equal(guard.favorite, 'home');
+  assert.ok(guard.draw_delta > 0.02);
+  assert.ok(opinion.probabilities.draw >= 0.18);
+  assert.ok(opinion.probabilities.home < 0.76);
+  assert.match(opinion.summary, /Plancher favori fort/);
 });
 
 test('generateCodexOpinion : en KO sans cotes, integre l ecart de recuperation', () => {
