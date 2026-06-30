@@ -109,7 +109,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw_conviction_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail55_awaymod60_over_home40_overaway45_topdrawsteam70_top_cap_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail55_awaymod60_over_home40_overaway45_topdrawsteam70_top_cap_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -252,7 +252,7 @@ test('generateCodexOpinion : calibre la confiance quand le choix force historiqu
   assert.ok(opinion.confidence_score >= 50);
 });
 
-test('generateCodexOpinion : baisse la confiance dun favori contredit par la forme tournoi', () => {
+test('generateCodexOpinion : recalcule le choix force apres un favori contredit par la forme tournoi', () => {
   const db = freshDb();
   db.prepare("UPDATE matches SET matchday = 2, kickoff_utc = '2026-06-15T19:00:00Z' WHERE id = 1").run();
   db.prepare("INSERT INTO teams (id, fifa_code, name, group_code) VALUES (3,'TST','Test A','A'), (4,'TSB','Test B','A')").run();
@@ -277,11 +277,10 @@ test('generateCodexOpinion : baisse la confiance dun favori contredit par la for
   insertStrongHomeMarket(db);
 
   const opinion = generateCodexOpinion(db, 1);
-  const confidenceContext = opinion.diagnostics.confidence_context;
   const guard = opinion.diagnostics.team_form_contrarian_draw_guard;
 
   assert.equal(opinion.forced_pick_market, '1X2');
-  assert.equal(opinion.forced_pick_selection, 'home');
+  assert.equal(opinion.forced_pick_selection, 'draw');
   assert.equal(guard.available, true);
   assert.equal(guard.applied, true);
   assert.equal(guard.profile, 'strong_contrarian_side_favorite');
@@ -291,7 +290,7 @@ test('generateCodexOpinion : baisse la confiance dun favori contredit par la for
   assert.equal(guard.favorite_floor, 0.5);
   assert.ok(guard.draw_delta > 0);
   assert.ok(opinion.probabilities.draw > guard.draw_prob);
-  assert.ok(confidenceContext.adjustments.some((item) => item.key === 'team_form_contrarian_favorite_caution'));
+  assert.ok(opinion.probabilities.draw > opinion.probabilities.home);
   assert.match(opinion.summary, /Forme tournoi contradictoire/);
 });
 

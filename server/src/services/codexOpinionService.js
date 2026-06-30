@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v84';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v85';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -2670,7 +2670,8 @@ function forcedDrawConvictionPlan(probs, forced, calibration, live) {
     final_market: forced?.market || null,
     final_selection: forced?.selection || null,
     draw_prob: probs?.draw == null ? null : round(probs.draw),
-    min_effective_n: 5,
+    min_effective_n: 1.5,
+    min_raw_n: 2,
     min_hit_rate: 0.8,
     min_confidence_gap: 0.35,
     target_draw: 0.58,
@@ -2679,6 +2680,7 @@ function forcedDrawConvictionPlan(probs, forced, calibration, live) {
     hit_rate: null,
     avg_confidence: null,
     confidence_gap: null,
+    raw_n: null,
     effective_n: null,
     draw_delta: 0,
     deltas: { home: 0, draw: 0, away: 0 },
@@ -2690,8 +2692,10 @@ function forcedDrawConvictionPlan(probs, forced, calibration, live) {
   const hitRate = Number(stats?.hit_rate);
   const confidenceGap = Number(stats?.confidence_gap);
   const avgConfidence = Number(stats?.avg_confidence);
+  const rawN = Number(stats?.n || 0);
   const withContext = {
     ...base,
+    raw_n: Number.isFinite(rawN) ? rawN : null,
     effective_n: Number.isFinite(effectiveN) ? round(effectiveN, 2) : null,
     hit_rate: Number.isFinite(hitRate) ? round(hitRate) : null,
     avg_confidence: Number.isFinite(avgConfidence) ? round(avgConfidence) : null,
@@ -2699,6 +2703,7 @@ function forcedDrawConvictionPlan(probs, forced, calibration, live) {
   };
   if (
     !forcedDraw ||
+    rawN < base.min_raw_n ||
     effectiveN < base.min_effective_n ||
     !Number.isFinite(hitRate) ||
     hitRate < base.min_hit_rate ||
@@ -5376,13 +5381,13 @@ export function generateCodexOpinion(db, matchId) {
   h2h = applyCentralDrawBandAdjustment(h2h, centralDrawBandAdjustment);
   const strongFavoriteDrawTail = strongFavoriteDrawTailPlan(match, h2h, teamForm, live);
   h2h = applyStrongFavoriteDrawTail(h2h, strongFavoriteDrawTail);
+  const teamFormContrarianDrawGuard = teamFormContrarianDrawGuardPlan(match, h2h, teamForm, live);
+  h2h = applyTeamFormContrarianDrawGuard(h2h, teamFormContrarianDrawGuard);
   fairOdds = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, impliedOdds(h2h[o])]));
   const forced = bestForcedPick(match, h2h, fairOdds, market, totals, calibration, teamForm);
   const forcedDrawConviction = forcedDrawConvictionPlan(h2h, forced, calibration, live);
   h2h = applyForcedDrawConviction(h2h, forcedDrawConviction);
   const teamFormProbabilities = h2h;
-  const teamFormContrarianDrawGuard = teamFormContrarianDrawGuardPlan(match, h2h, teamForm, live);
-  h2h = applyTeamFormContrarianDrawGuard(h2h, teamFormContrarianDrawGuard);
   const forcedScenarioAlignment = forcedScenarioAlignmentPlan(h2h, forced, live);
   h2h = applyForcedScenarioAlignment(h2h, forcedScenarioAlignment);
   fairOdds = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, impliedOdds(h2h[o])]));
@@ -5549,7 +5554,7 @@ export function generateCodexOpinion(db, matchId) {
   const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, knockoutDrawMemoryAdjustment, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression, homeFavoriteOpenAwayTransfer, centralDrawBandAdjustment, strongFavoriteDrawTail, teamFormContrarianDrawGuard, forcedDrawConviction, forcedScenarioAlignment, finalOuH2hUncertainty, finalOuH2hCalibration);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw_conviction_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail55_awaymod60_over_home40_overaway45_topdrawsteam70_top_cap_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw_conviction_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail55_awaymod60_over_home40_overaway45_topdrawsteam70_top_cap_line_calibrated`,
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail55_awaymod60_over_home40_overaway45_topdrawsteam70_top_cap_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail55_awaymod60_over_home40_overaway45_topdrawsteam70_top_cap_line_calibrated`,
     h2h_books: market?.books || 0,
     prior: prior.context,
     market_movement: marketMovement,
