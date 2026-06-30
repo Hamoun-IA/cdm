@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v57';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v58';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -94,7 +94,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v56' || version === 'codex-book-v55' || version === 'codex-book-v54' || version === 'codex-book-v53' || version === 'codex-book-v52' || version === 'codex-book-v51' || version === 'codex-book-v50' || version === 'codex-book-v49' || version === 'codex-book-v48' || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v57' || version === 'codex-book-v56' || version === 'codex-book-v55' || version === 'codex-book-v54' || version === 'codex-book-v53' || version === 'codex-book-v52' || version === 'codex-book-v51' || version === 'codex-book-v50' || version === 'codex-book-v49' || version === 'codex-book-v48' || version === 'codex-book-v47' || version === 'codex-book-v46' || version === 'codex-book-v45' || version === 'codex-book-v44' || version === 'codex-book-v43' || version === 'codex-book-v42' || version === 'codex-book-v41' || version === 'codex-book-v40' || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -3156,7 +3156,7 @@ function forcedCandidateDiagnostic(candidate) {
   };
 }
 
-function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
+function bestForcedPick(match, h2h, fairOdds, market, totals, calibration, teamForm = null) {
   const candidates = H2H_OUTCOMES.map((o) => {
     const price = market?.best?.[o]?.price || null;
     return {
@@ -3213,6 +3213,7 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
       standard_total_draw_crossover_guard: 0,
       knockout_side_draw_guard: 0,
       opening_home_draw_position_guard: 0,
+      matchday2_equal_points_home_draw_guard: 0,
       synthetic_lean: syntheticLean,
       ou_cross_market_friction: crossMarketFriction,
       edge,
@@ -3285,6 +3286,33 @@ function bestForcedPick(match, h2h, fairOdds, market, totals, calibration) {
       if (standardTotalDrawCrossover > 0) {
         centralDraw.choice_adjustments.standard_total_draw_crossover_guard = boost;
       }
+      ranked = sortCandidates();
+    }
+  }
+  const matchday2EqualPointsHomeDraw = match?.stage === 'GROUP'
+    && Number(match?.matchday) === 2
+    && Number(teamForm?.home?.played || 0) === 1
+    && Number(teamForm?.away?.played || 0) === 1
+    && Number(teamForm?.home?.points) === 3
+    && Number(teamForm?.away?.points) === 3;
+  const matchday2DrawCandidate = ranked.find((candidate) => (
+    candidate.market === '1X2'
+    && candidate.selection === 'draw'
+    && Number(candidate.probability || 0) >= 0.29
+  ));
+  if (
+    matchday2EqualPointsHomeDraw
+    && ranked[0]?.market === '1X2'
+    && ranked[0].selection === 'home'
+    && matchday2DrawCandidate
+  ) {
+    const homeProbability = Number(ranked[0].probability || 0);
+    const awayProbability = Number(h2h.away || 0);
+    const gap = ranked[0].choice_score - matchday2DrawCandidate.choice_score;
+    if (homeProbability >= 0.64 && homeProbability <= 0.705 && awayProbability <= 0.04 && gap >= 0 && gap <= 0.38) {
+      const boost = round(gap + 0.0002);
+      matchday2DrawCandidate.choice_score = round(matchday2DrawCandidate.choice_score + boost);
+      matchday2DrawCandidate.choice_adjustments.matchday2_equal_points_home_draw_guard = boost;
       ranked = sortCandidates();
     }
   }
@@ -4111,7 +4139,7 @@ export function generateCodexOpinion(db, matchId) {
     live
   );
   let fairOdds = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, impliedOdds(h2h[o])]));
-  const preliminaryForced = bestForcedPick(match, h2h, fairOdds, market, totals, calibration);
+  const preliminaryForced = bestForcedPick(match, h2h, fairOdds, market, totals, calibration, teamForm);
   const forcedOuDrawAdjustment = forcedOuDrawAdjustmentPlan(h2h, preliminaryForced, live);
   h2h = applyForcedOuDrawAdjustment(h2h, forcedOuDrawAdjustment);
   const openMatchDrawGuard = openMatchDrawGuardPlan(match, h2h, calibration, !!market, live);
@@ -4127,7 +4155,7 @@ export function generateCodexOpinion(db, matchId) {
   const centralDrawBandAdjustment = centralDrawBandAdjustmentPlan(h2h, calibration, !!market, live);
   h2h = applyCentralDrawBandAdjustment(h2h, centralDrawBandAdjustment);
   fairOdds = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, impliedOdds(h2h[o])]));
-  const forced = bestForcedPick(match, h2h, fairOdds, market, totals, calibration);
+  const forced = bestForcedPick(match, h2h, fairOdds, market, totals, calibration, teamForm);
   const confidenceContext = confidenceDetails({ match, market, totals, intel, scorecard, previous, calibration, teamForm, live, marketMovement, probabilities: h2h, forced });
   const conf = confidenceContext.score;
   const previousLive = previous?.diagnostics?.live_context || null;

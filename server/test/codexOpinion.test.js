@@ -184,6 +184,49 @@ test('generateCodexOpinion : force le nul J1 sur favori domicile compresse et nu
   assert.ok(forced.choice_adjustments.opening_home_draw_position_guard > 0);
 });
 
+test('generateCodexOpinion : force le nul J2 entre deux vainqueurs avec favori domicile tres bas cote', () => {
+  const db = freshDb();
+  db.prepare("UPDATE matches SET matchday = 2, kickoff_utc = '2026-06-15T19:00:00Z' WHERE id = 1").run();
+  db.prepare(`
+    INSERT INTO teams (id, fifa_code, name, group_code)
+    VALUES (3, 'T3', 'Equipe 3', 'A'), (4, 'T4', 'Equipe 4', 'A')
+  `).run();
+  insertTeamResult(db, {
+    id: 2,
+    kickoff: '2026-06-11T19:00:00Z',
+    home: 1,
+    away: 3,
+    homeScore: 2,
+    awayScore: 0,
+  });
+  insertTeamResult(db, {
+    id: 3,
+    kickoff: '2026-06-11T20:00:00Z',
+    home: 2,
+    away: 4,
+    homeScore: 2,
+    awayScore: 0,
+  });
+  for (const bookmaker of ['book-a', 'book-b']) {
+    for (const [outcome, price] of [['home', 1.42], ['draw', 3.00], ['away', 18.00]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-15T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const forced = opinion.diagnostics.forced_choice;
+
+  assert.equal(opinion.diagnostics.team_form.home.points, 3);
+  assert.equal(opinion.diagnostics.team_form.away.points, 3);
+  assert.equal(forced.preliminary_market, '1X2');
+  assert.equal(forced.market, '1X2');
+  assert.equal(forced.selection, 'draw');
+  assert.ok(forced.choice_adjustments.matchday2_equal_points_home_draw_guard > 0);
+});
+
 test('generateCodexOpinion : ne rehausse pas le nul groupe apres la premiere journee', () => {
   const db = freshDb();
   db.prepare('UPDATE matches SET matchday = 2 WHERE id = 1').run();
