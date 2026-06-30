@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v39';
+const MODEL_VERSION = 'codex-book-v40';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v39' || version === 'codex-book-v38' || version === 'codex-book-v37' || version === 'codex-book-v36' || version === 'codex-book-v35' || version === 'codex-book-v34' || version === 'codex-book-v33' || version === 'codex-book-v32' || version === 'codex-book-v31' || version === 'codex-book-v30' || version === 'codex-book-v29' || version === 'codex-book-v28' || version === 'codex-book-v27' || version === 'codex-book-v26' || version === 'codex-book-v25' || version === 'codex-book-v24' || version === 'codex-book-v23' || version === 'codex-book-v22' || version === 'codex-book-v21' || version === 'codex-book-v20' || version === 'codex-book-v19' || version === 'codex-book-v18' || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -1733,6 +1733,49 @@ function homeFavoriteAwayCompressionPlan(probs, calibration, hasMarket, live) {
       ...base,
       favorite,
       favorite_prob: round(favoriteProb),
+    };
+  }
+
+  const mediumSource = calibration?.h2h_regimes?.['favorite_confidence:home:medium'];
+  const mediumEffectiveN = Number(mediumSource?.effective_n || 0);
+  const mediumAwayBias = Number(mediumSource?.bias?.away || 0);
+  const mediumHomeUnder = Math.max(0, Number(mediumSource?.bias?.home || 0));
+  const mediumDrawBias = Number(mediumSource?.bias?.draw || 0);
+  if (
+    favoriteProb < 0.65
+    && mediumEffectiveN >= 10
+    && mediumAwayBias <= -0.08
+    && mediumHomeUnder >= 0.08
+    && mediumDrawBias <= 0.025
+  ) {
+    const maxMove = hasMarket ? 0.045 : 0.03;
+    const memoryMultiplier = 4;
+    const compressionDelta = clamp(
+      Math.abs(mediumAwayBias) * Number(mediumSource.weight || 0) * memoryMultiplier,
+      0,
+      maxMove
+    );
+    const applied = compressionDelta >= 0.003 && awayProb - compressionDelta >= 0.025;
+    const deltas = { home: 0, draw: 0, away: 0 };
+    if (applied) {
+      deltas.away = round(-compressionDelta);
+      deltas.home = round(compressionDelta);
+    }
+
+    return {
+      ...base,
+      available: true,
+      applied,
+      favorite,
+      favorite_prob: round(favoriteProb),
+      away_prob: round(awayProb),
+      away_bias: round(mediumAwayBias),
+      effective_n: round(mediumEffectiveN, 2),
+      source_key: 'favorite_confidence:home:medium',
+      max_move: round(maxMove),
+      memory_multiplier: round(memoryMultiplier),
+      compression_delta: applied ? round(compressionDelta) : 0,
+      deltas,
     };
   }
 

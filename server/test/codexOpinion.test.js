@@ -81,7 +81,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v39');
+  assert.equal(opinion.model_version, 'codex-book-v40');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -1068,6 +1068,58 @@ test('generateCodexOpinion : compresse l outsider exterieur des favoris domicile
   assert.ok(compression.deltas.away < 0);
   assert.ok(compression.deltas.home > 0);
   assert.ok(compression.deltas.draw > 0);
+  assert.ok(opinion.probabilities.away < compression.away_prob);
+  assert.match(opinion.summary, /outsider exterieur/);
+});
+
+test('generateCodexOpinion : compresse l outsider exterieur des favoris domicile moderes', () => {
+  const db = freshDb();
+  db.prepare('UPDATE matches SET matchday = 2 WHERE id = 1').run();
+  db.prepare("INSERT INTO teams (id, fifa_code, name, group_code) VALUES (3,'TST','Temoin A','A'), (4,'TSB','Temoin B','A')").run();
+  for (const [bookmaker, home, draw, away] of [
+    ['book-a', 1.72, 3.90, 5.40],
+    ['book-b', 1.74, 3.85, 5.20],
+    ['book-c', 1.70, 4.00, 5.60],
+  ]) {
+    for (const [outcome, price] of [['home', home], ['draw', draw], ['away', away]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+  }
+  for (let id = 2; id <= 17; id++) {
+    insertTeamResult(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      home: 3,
+      away: 4,
+      homeScore: 2,
+      awayScore: 0,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-09T00:00:00Z',
+      modelVersion: 'codex-book-v36',
+      probabilities: { home: 0.56, draw: 0.30, away: 0.14 },
+      forcedMarket: '1X2',
+      forcedSelection: 'home',
+    });
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const compression = opinion.diagnostics.home_favorite_away_compression;
+
+  assert.equal(compression.available, true);
+  assert.equal(compression.applied, true);
+  assert.equal(compression.source_key, 'favorite_confidence:home:medium');
+  assert.ok(compression.effective_n >= 10);
+  assert.ok(compression.away_bias <= -0.08);
+  assert.equal(compression.memory_multiplier, 4);
+  assert.ok(compression.compression_delta > 0);
+  assert.ok(compression.deltas.away < 0);
+  assert.ok(compression.deltas.home > 0);
+  assert.equal(compression.deltas.draw, 0);
   assert.ok(opinion.probabilities.away < compression.away_prob);
   assert.match(opinion.summary, /outsider exterieur/);
 });
