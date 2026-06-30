@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-const MODEL_VERSION = 'codex-book-v17';
+const MODEL_VERSION = 'codex-book-v18';
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
 const RELIABILITY_BONUS = { haute: 10, moyenne: 6, basse: 2 };
@@ -93,7 +93,7 @@ function learningWeight(n, cap = 0.22, anchor = 18) {
 }
 
 function modelVersionLearningMultiplier(version) {
-  if (version === MODEL_VERSION || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
+  if (version === MODEL_VERSION || version === 'codex-book-v17' || version === 'codex-book-v16' || version === 'codex-book-v15' || version === 'codex-book-v14' || version === 'codex-book-v13' || version === 'codex-book-v12' || version === 'codex-book-v11' || version === 'codex-book-v10' || version === 'codex-book-v9' || version === 'codex-book-v8' || version === 'codex-book-v7' || version === 'codex-book-v6' || version === 'codex-book-v5' || version === 'codex-book-v4' || version === 'codex-book-v3') return 1;
   if (version === 'codex-book-v2') return 0.75;
   return 0.45;
 }
@@ -162,6 +162,27 @@ function h2hRegime(probs) {
       `favorite:${favorite}`,
     ],
   };
+}
+
+function h2hMarketMovementRegimeKeys(movement) {
+  if (!movement?.available || !movement.leader) return [];
+  const maxDelta = Number(movement.max_delta || 0);
+  if (maxDelta < 0.012) return [];
+  const leader = String(movement.leader);
+  const strength = maxDelta >= 0.025 ? 'strong' : 'medium';
+  const keys = [
+    `market_movement:${leader}:${strength}`,
+    `market_movement:${leader}`,
+  ];
+  if (
+    leader === 'home'
+    && strength === 'strong'
+    && Number(movement.delta?.draw || 0) <= 0
+    && Number(movement.delta?.away || 0) < 0
+  ) {
+    keys.unshift('market_movement:home:strong_draw_caution');
+  }
+  return keys;
 }
 
 function emptyRegimeBucket() {
@@ -327,6 +348,14 @@ function historicalCalibration(db, excludedMatchId, cutoffUtc = null) {
         favoriteHitWeight += rowWeight;
       }
       for (const key of h2hRegime(probs).keys) {
+        addRegimeSample(regimeBuckets, key, probs, actual, rowWeight);
+      }
+      const diagnostics = safeJson(row.diagnostics_json, null);
+      const movementKeys = new Set(h2hMarketMovementRegimeKeys(diagnostics?.market_movement));
+      for (const key of h2hMarketMovementRegimeKeys(h2hMarketMovement(prematchOddsRows(db, row.match_id, row.kickoff_utc)))) {
+        movementKeys.add(key);
+      }
+      for (const key of movementKeys) {
         addRegimeSample(regimeBuckets, key, probs, actual, rowWeight);
       }
     }
@@ -1265,6 +1294,17 @@ function latestOddsRows(db, matchId) {
   `).all(matchId);
 }
 
+function prematchOddsRows(db, matchId, kickoffUtc) {
+  return db.prepare(`
+    SELECT bookmaker, market, outcome, price, point, taken_at, is_closing
+    FROM odds_snapshots
+    WHERE match_id = ?
+      AND (? IS NULL OR taken_at <= ?)
+    ORDER BY taken_at DESC, id DESC
+    LIMIT 1500
+  `).all(matchId, kickoffUtc, kickoffUtc);
+}
+
 function latestByKey(rows, keyFn) {
   const map = new Map();
   for (const row of rows) {
@@ -1365,7 +1405,7 @@ function h2hMarketMovement(rows) {
   };
 }
 
-function h2hMarketMovementAdjustmentPlan(movement) {
+function h2hMarketMovementAdjustmentPlan(movement, calibration = null) {
   if (!movement?.available || !movement.delta || movement.max_delta < 0.012) {
     return {
       available: !!movement?.available,
@@ -1373,6 +1413,7 @@ function h2hMarketMovementAdjustmentPlan(movement) {
       weight: 0,
       max_move: 0,
       deltas: { home: 0, draw: 0, away: 0 },
+      home_steam_draw_caution: { applied: false, draw_delta: 0 },
     };
   }
   const depth = clamp(Number(movement.latest_books || 0) / 12, 0.45, 1);
@@ -1382,6 +1423,45 @@ function h2hMarketMovementAdjustmentPlan(movement) {
     outcome,
     round(clamp(Number(movement.delta[outcome] || 0) * weight, -maxMove, maxMove)),
   ]));
+  const homeSteamDrawCaution = { applied: false, draw_delta: 0 };
+  if (
+    movement.leader === 'home'
+    && Number(movement.max_delta || 0) >= 0.025
+    && Number(movement.delta.draw || 0) <= 0
+    && Number(movement.delta.away || 0) < 0
+  ) {
+    const fallbackDelta = clamp((Number(movement.max_delta) - 0.018) * depth * 0.42, 0, 0.012);
+    const regimes = calibration?.h2h_regimes || {};
+    const sourceKey = regimes['market_movement:home:strong_draw_caution']
+      ? 'market_movement:home:strong_draw_caution'
+      : 'market_movement:home:strong';
+    const source = regimes[sourceKey];
+    const effectiveN = Number(source?.effective_n || 0);
+    const drawBias = Number(source?.bias?.draw || 0);
+    const sampleWeight = effectiveN / (effectiveN + 9);
+    const calibratedCap = effectiveN >= 7 ? 0.052 : effectiveN >= 4.5 ? 0.038 : 0.024;
+    const calibratedDelta = effectiveN >= 2.5 && drawBias >= 0.08
+      ? clamp((drawBias - 0.03) * sampleWeight * 0.72, 0, calibratedCap)
+      : 0;
+    const pressureDelta = clamp((Number(movement.max_delta) - 0.025) * depth * 0.15, 0, 0.008);
+    const drawDelta = round(clamp(Math.max(fallbackDelta, calibratedDelta + pressureDelta), 0, 0.056));
+    if (drawDelta >= 0.002) {
+      deltas.home = round(deltas.home - drawDelta * 0.72);
+      deltas.draw = round(deltas.draw + drawDelta);
+      deltas.away = round(deltas.away - drawDelta * 0.28);
+      Object.assign(homeSteamDrawCaution, {
+        applied: true,
+        draw_delta: drawDelta,
+        fallback_delta: round(fallbackDelta),
+        calibrated_delta: round(calibratedDelta),
+        pressure_delta: round(pressureDelta),
+        source_key: source?.effective_n ? sourceKey : null,
+        effective_n: source?.effective_n ? round(effectiveN, 2) : null,
+        draw_bias: source?.effective_n ? round(drawBias) : null,
+        sample_weight: source?.effective_n ? round(sampleWeight) : null,
+      });
+    }
+  }
   const applied = H2H_OUTCOMES.some((outcome) => Math.abs(deltas[outcome]) >= 0.001);
   return {
     available: true,
@@ -1392,6 +1472,7 @@ function h2hMarketMovementAdjustmentPlan(movement) {
     steam_to: movement.steam_to,
     drift_from: movement.drift_from,
     deltas,
+    home_steam_draw_caution: homeSteamDrawCaution,
   };
 }
 
@@ -2337,7 +2418,7 @@ export function generateCodexOpinion(db, matchId) {
 
   const market = h2hMarket(odds);
   const marketMovement = h2hMarketMovement(odds);
-  const marketMovementAdjustment = h2hMarketMovementAdjustmentPlan(marketMovement);
+  const marketMovementAdjustment = h2hMarketMovementAdjustmentPlan(marketMovement, calibration);
   const totalsMovement = totalsMarketMovement(odds);
   const teamFormAdjustment = teamFormAdjustmentPlan(teamForm, !!market);
   const restContext = knockoutRestContext(match, teamForm);

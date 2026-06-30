@@ -81,7 +81,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v17');
+  assert.equal(opinion.model_version, 'codex-book-v18');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -748,6 +748,100 @@ test('generateCodexOpinion : compresse les favoris domicile souvent tenus en ech
   assert.match(opinion.summary, /Memoire favoris tenus en echec/);
 });
 
+test('generateCodexOpinion : protege le nul quand le mouvement home est trop agressif', () => {
+  const baselineDb = freshDb();
+  for (const bookmaker of ['book-a', 'book-b', 'book-c']) {
+    for (const [outcome, price] of [['home', 1.70], ['draw', 4.20], ['away', 6.40]]) {
+      baselineDb.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+  }
+  const baseline = generateCodexOpinion(baselineDb, 1);
+
+  const db = freshDb();
+  for (const bookmaker of ['book-a', 'book-b', 'book-c']) {
+    for (const [takenAt, home, draw, away] of [
+      ['2026-06-10T08:00:00Z', 2.35, 3.25, 3.05],
+      ['2026-06-11T08:00:00Z', 1.70, 4.20, 6.40],
+    ]) {
+      for (const [outcome, price] of [['home', home], ['draw', draw], ['away', away]]) {
+        db.prepare(`
+          INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+          VALUES (1, @bookmaker, 'h2h', @outcome, @price, @taken_at)
+        `).run({ bookmaker, outcome, price, taken_at: takenAt });
+      }
+    }
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const adjustment = opinion.diagnostics.h2h_market_movement_adjustment;
+
+  assert.equal(opinion.diagnostics.market_movement.leader, 'home');
+  assert.equal(adjustment.home_steam_draw_caution.applied, true);
+  assert.ok(adjustment.home_steam_draw_caution.draw_delta > 0);
+  assert.ok(adjustment.deltas.draw > 0);
+  assert.ok(opinion.probabilities.draw > baseline.probabilities.draw);
+});
+
+test('generateCodexOpinion : apprend les steam home historiques qui finissent en nul', () => {
+  const baselineDb = freshDb();
+  const db = freshDb();
+  for (const targetDb of [baselineDb, db]) {
+    for (const bookmaker of ['book-a', 'book-b', 'book-c']) {
+      for (const [takenAt, home, draw, away] of [
+        ['2026-06-10T08:00:00Z', 2.35, 3.25, 3.05],
+        ['2026-06-11T08:00:00Z', 1.70, 4.20, 6.40],
+      ]) {
+        for (const [outcome, price] of [['home', home], ['draw', draw], ['away', away]]) {
+          targetDb.prepare(`
+            INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+            VALUES (1, @bookmaker, 'h2h', @outcome, @price, @taken_at)
+          `).run({ bookmaker, outcome, price, taken_at: takenAt });
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < 6; i += 1) {
+    const matchId = 20 + i;
+    insertTeamResult(db, {
+      id: matchId,
+      kickoff: `2026-06-0${i + 1}T19:00:00Z`,
+      home: 1,
+      away: 2,
+      homeScore: 1,
+      awayScore: 1,
+    });
+    insertHistoricalOpinion(db, {
+      matchId,
+      generatedAt: `2026-06-0${i + 1}T10:00:00Z`,
+      modelVersion: 'codex-book-v17',
+      probabilities: { home: 0.66, draw: 0.18, away: 0.16 },
+      forcedMarket: '1X2',
+      forcedSelection: 'home',
+      diagnostics: {
+        market_movement: {
+          available: true,
+          leader: 'home',
+          max_delta: 0.05,
+          delta: { home: 0.05, draw: -0.018, away: -0.032 },
+        },
+      },
+    });
+  }
+
+  const baseline = generateCodexOpinion(baselineDb, 1);
+  const opinion = generateCodexOpinion(db, 1);
+  const adjustment = opinion.diagnostics.h2h_market_movement_adjustment.home_steam_draw_caution;
+
+  assert.equal(adjustment.applied, true);
+  assert.equal(adjustment.source_key, 'market_movement:home:strong_draw_caution');
+  assert.ok(adjustment.calibrated_delta > adjustment.fallback_delta);
+  assert.ok(opinion.probabilities.draw - baseline.probabilities.draw > 0.018);
+});
+
 test('generateCodexOpinion : applique le mouvement marche 1X2 dans la bonne direction', () => {
   const db = freshDb();
   for (const bookmaker of ['book-a', 'book-b', 'book-c']) {
@@ -797,6 +891,7 @@ function insertHistoricalOpinion(db, {
   forcedMarket = '1X2',
   forcedSelection = 'away',
   modelVersion = 'codex-book-v1',
+  diagnostics = {},
 } = {}) {
   db.prepare(`
     INSERT INTO codex_opinions (
@@ -807,7 +902,7 @@ function insertHistoricalOpinion(db, {
     VALUES (
       @match_id, NULL, @model_version, @input_hash, 'Historique test', 'Historique test',
       @forced_pick_market, @forced_pick_selection, @forced_pick_label, 50,
-      @probabilities_json, '{}', @totals_json, '{}', 'Historique test', @generated_at
+      @probabilities_json, '{}', @totals_json, @diagnostics_json, 'Historique test', @generated_at
     )
   `).run({
     match_id: matchId,
@@ -818,6 +913,7 @@ function insertHistoricalOpinion(db, {
     forced_pick_label: forcedSelection,
     probabilities_json: JSON.stringify(probabilities),
     totals_json: JSON.stringify(totals),
+    diagnostics_json: JSON.stringify(diagnostics),
     generated_at: generatedAt,
   });
 }
