@@ -5,7 +5,7 @@ import { latestIntel } from './intelService.js';
 import { latestDecision } from './decisionsService.js';
 import { latestScorecard } from './scorecardService.js';
 
-export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v91';
+export const CURRENT_CODEX_MODEL_VERSION = 'codex-book-v92';
 const MODEL_VERSION = CURRENT_CODEX_MODEL_VERSION;
 const H2H_OUTCOMES = ['home', 'draw', 'away'];
 const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'];
@@ -1843,10 +1843,30 @@ function applyGroupOpeningDrawAdjustment(probs, plan) {
   return normalize(adjusted);
 }
 
-function forcedOuDrawSettings(preliminaryForced) {
+function isKnockoutMarginalStandardOver(match, preliminaryForced) {
+  return !!(
+    match?.stage
+    && match.stage !== 'GROUP'
+    && preliminaryForced?.market === 'OU_2.5'
+    && preliminaryForced?.selection === 'over'
+    && !preliminaryForced?.synthetic
+    && Number(preliminaryForced?.probability || 0) < 0.54
+  );
+}
+
+function forcedOuDrawSettings(preliminaryForced, match) {
   const market = String(preliminaryForced?.market || '');
-  const match = market.match(/^OU_(\d+(?:\.\d+)?)$/);
-  const line = match ? Number(match[1]) : null;
+  const marketMatch = market.match(/^OU_(\d+(?:\.\d+)?)$/);
+  const line = marketMatch ? Number(marketMatch[1]) : null;
+  if (line === 2.5 && isKnockoutMarginalStandardOver(match, preliminaryForced)) {
+    return {
+      line,
+      profile: 'knockout_marginal_over_2_5_guard',
+      targetDraw: 0.38,
+      factor: 0.55,
+      maxMove: 0.035,
+    };
+  }
   if (line === 2.5) {
     return {
       line,
@@ -1874,10 +1894,11 @@ function forcedOuDrawSettings(preliminaryForced) {
   };
 }
 
-function forcedOuDrawAdjustmentPlan(probs, preliminaryForced, live) {
+function forcedOuDrawAdjustmentPlan(probs, preliminaryForced, live, match) {
   const market = String(preliminaryForced?.market || '');
   const ouForced = market.startsWith('OU_');
-  const settings = forcedOuDrawSettings(preliminaryForced);
+  const stackGuard = isKnockoutMarginalStandardOver(match, preliminaryForced);
+  const settings = forcedOuDrawSettings(preliminaryForced, match);
   const base = {
     available: ouForced && !live?.active,
     applied: false,
@@ -1891,6 +1912,7 @@ function forcedOuDrawAdjustmentPlan(probs, preliminaryForced, live) {
     target_draw: round(settings.targetDraw),
     max_move: round(settings.maxMove),
     factor: round(settings.factor),
+    stack_guard: stackGuard ? 'knockout_marginal_over_2_5' : null,
     draw_delta: 0,
     deltas: { home: 0, draw: 0, away: 0 },
   };
@@ -1931,7 +1953,8 @@ function applyForcedOuDrawAdjustment(probs, plan) {
   return normalize(adjusted);
 }
 
-function openMatchDrawGuardPlan(match, probs, calibration, hasMarket, live) {
+function openMatchDrawGuardPlan(match, probs, calibration, hasMarket, live, preliminaryForced = null) {
+  const stackGuard = isKnockoutMarginalStandardOver(match, preliminaryForced);
   const base = {
     available: !live?.active,
     applied: false,
@@ -1944,6 +1967,7 @@ function openMatchDrawGuardPlan(match, probs, calibration, hasMarket, live) {
     source_key: 'confidence:open',
     target_draw: null,
     max_move: null,
+    stack_guard: stackGuard ? 'knockout_marginal_over_2_5' : null,
     draw_delta: 0,
     deltas: { home: 0, draw: 0, away: 0 },
   };
@@ -1964,6 +1988,17 @@ function openMatchDrawGuardPlan(match, probs, calibration, hasMarket, live) {
   const drawBias = Number(source?.bias?.draw || 0);
   const homeOver = Math.max(0, -Number(source?.bias?.home || 0));
   const awayOver = Math.max(0, -Number(source?.bias?.away || 0));
+  if (stackGuard) {
+    return {
+      ...base,
+      available: true,
+      favorite,
+      favorite_prob: round(favoriteProb),
+      draw_prob: round(drawProb),
+      draw_bias: round(drawBias),
+      effective_n: round(effectiveN, 2),
+    };
+  }
   if (effectiveN < 6 || drawBias < 0.06 || (homeOver + awayOver) < 0.04) {
     return {
       ...base,
@@ -5374,9 +5409,9 @@ export function generateCodexOpinion(db, matchId) {
   );
   let fairOdds = Object.fromEntries(H2H_OUTCOMES.map((o) => [o, impliedOdds(h2h[o])]));
   const preliminaryForced = bestForcedPick(match, h2h, fairOdds, market, totals, calibration, teamForm, { tournamentChoiceGuards: false });
-  const forcedOuDrawAdjustment = forcedOuDrawAdjustmentPlan(h2h, preliminaryForced, live);
+  const forcedOuDrawAdjustment = forcedOuDrawAdjustmentPlan(h2h, preliminaryForced, live, match);
   h2h = applyForcedOuDrawAdjustment(h2h, forcedOuDrawAdjustment);
-  const openMatchDrawGuard = openMatchDrawGuardPlan(match, h2h, calibration, !!market, live);
+  const openMatchDrawGuard = openMatchDrawGuardPlan(match, h2h, calibration, !!market, live, preliminaryForced);
   h2h = applyOpenMatchDrawGuard(h2h, openMatchDrawGuard);
   const drawFavoriteConviction = drawFavoriteConvictionPlan(h2h, calibration, !!market, live);
   h2h = applyDrawFavoriteConviction(h2h, drawFavoriteConviction);
@@ -5563,7 +5598,7 @@ export function generateCodexOpinion(db, matchId) {
   const text = summarize(match, h2h, totals, forced, conf, sources, calibration, teamForm, live, marketMovement, regimeCalibration, goalsContext, totalsMovement, teamFormAdjustment, restContext, restAdjustment, knockoutRegulationAdjustment, homeFavoriteDrawGuard, awayFavoriteDrawCompression, knockoutDrawFloorGuard, knockoutDrawMemoryAdjustment, strongFavoriteDrawFloorGuard, strongAwayFavoriteFollowThrough, groupOpeningDrawAdjustment, forcedOuDrawAdjustment, openMatchDrawGuard, drawFavoriteConviction, homeFavoriteAwayCompression, homeFavoriteResidualAwayCompression, homeFavoriteOpenAwayTransfer, centralDrawBandAdjustment, strongFavoriteDrawTail, teamFormContrarianDrawGuard, forcedDrawConviction, forcedScenarioAlignment, finalOuH2hUncertainty, finalOuH2hCalibration);
   const diagnostics = {
     model_version: MODEL_VERSION,
-    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod40_shallowhome36_over15draw28_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod40_shallowhome36_over15draw28_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated`,
+    h2h_anchor: market ? 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod40_shallowhome36_over15draw28_koover25guard_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated' : `${prior.context.source}_plus_marketless_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod40_shallowhome36_over15draw28_koover25guard_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated`,
     h2h_books: market?.books || 0,
     prior: prior.context,
     market_movement: marketMovement,

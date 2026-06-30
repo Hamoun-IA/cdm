@@ -109,7 +109,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod40_shallowhome36_over15draw28_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_away32x14_lowdraw_forced_draw62_conviction_raw2_post_contrarian_forced_team_form_contrarian_draw45_forced_scenario_alignment_final_ou_split_30_ou_h2h_cal_ou15_draw_lock_under_home95_awaytail30_awaymod40_shallowhome36_over15draw28_koover25guard_over_home40_overaway45_topdrawsteam70strong100_top_cap_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -1592,6 +1592,27 @@ test('generateCodexOpinion : en KO avec marche, compresse un favori tres haut su
   assert.ok(opinion.probabilities.draw > 0.45);
   assert.ok(opinion.probabilities.home < 0.76);
   assert.match(opinion.summary, /Format KO 90 min/);
+});
+
+test('generateCodexOpinion : limite le stacking nul KO sur Over 2.5 marginal', () => {
+  const db = freshDb();
+  db.prepare("UPDATE matches SET stage = 'R32', group_code = NULL WHERE id = 1").run();
+  const bookmakers = Array.from({ length: 12 }, (_, index) => `book-${index}`);
+  insertH2hOdds(db, [['home', 3.80], ['draw', 3.20], ['away', 2.20]], { bookmakers });
+  insertTotalOdds(db, 2.5, 1.96, 2.00, { bookmakers });
+
+  const opinion = generateCodexOpinion(db, 1);
+  const forcedOu = opinion.diagnostics.forced_ou_draw_adjustment;
+  const openGuard = opinion.diagnostics.open_match_draw_guard;
+
+  assert.equal(forcedOu.profile, 'knockout_marginal_over_2_5_guard');
+  assert.equal(forcedOu.stack_guard, 'knockout_marginal_over_2_5');
+  assert.equal(forcedOu.max_move, 0.035);
+  assert.equal(openGuard.stack_guard, 'knockout_marginal_over_2_5');
+  assert.equal(openGuard.applied, false);
+  assert.equal(opinion.forced_pick_market, 'OU_2.5');
+  assert.equal(opinion.forced_pick_selection, 'over');
+  assert.ok(opinion.probabilities.draw < 0.4);
 });
 
 test('generateCodexOpinion : protege un plancher de nul 90 min KO apres calibration', () => {
