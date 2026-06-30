@@ -81,7 +81,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v32');
+  assert.equal(opinion.model_version, 'codex-book-v33');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -149,7 +149,9 @@ test('generateCodexOpinion : resserre le 1X2 vers le nul quand le signal initial
   assert.equal(adjustment.preliminary_market, 'OU_2.5');
   assert.equal(adjustment.line, 2.5);
   assert.equal(adjustment.profile, 'standard_total_2_5');
-  assert.ok(adjustment.draw_delta > 0.026);
+  assert.equal(adjustment.target_draw, 0.56);
+  assert.equal(adjustment.max_move, 0.11);
+  assert.ok(adjustment.draw_delta > 0.045);
   assert.ok(opinion.probabilities.draw > adjustment.draw_prob);
   assert.match(opinion.summary, /Signal O\/U 2\.5 dominant/);
 });
