@@ -109,7 +109,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   assert.equal(opinion.fair_odds.home > 1, true);
   assert.deepEqual(opinion.totals.map((t) => t.line), [2.5, 3.5]);
   assert.equal(opinion.totals.some((t) => t.depth_adjusted), true);
-  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_team_form_contrarian_draw_forced_scenario_alignment_final_ou_split_34_top_cap_line_calibrated');
+  assert.equal(opinion.diagnostics.h2h_anchor, 'market_demarginated_median_plus_team_form_rest_market_movement_knockout90_ko_draw_memory_power_rating_regime_draw_guard_strong_away_follow_group_opening_forced_ou_open_match_draw_favorite_home_away_residual_open_transfer_draw_band_strong_favorite_tail_forced_draw_conviction_team_form_contrarian_draw_forced_scenario_alignment_final_ou_split_34_top_cap_line_calibrated');
   assert.ok(opinion.forced_pick_label);
   assert.match(opinion.summary, /Si obligation de se positionner/);
   assert.equal(latestCodexOpinion(db, 1).id, opinion.id);
@@ -2093,6 +2093,47 @@ test('generateCodexOpinion : renforce le nul quand il est deja favori et confirm
   assert.ok(guard.deltas.away < 0);
   assert.ok(opinion.probabilities.draw > guard.draw_prob);
   assert.match(opinion.summary, /Memoire nul favori/);
+});
+
+test('generateCodexOpinion : renforce un choix final nul historiquement sous-confident', () => {
+  const db = freshDb();
+  db.prepare('UPDATE matches SET matchday = 2 WHERE id = 1').run();
+  insertH2hOdds(db, [['home', 3.20], ['draw', 2.55], ['away', 3.80]], { bookmakers: ['book-a', 'book-b', 'book-c'] });
+  for (let id = 2; id <= 10; id++) {
+    insertFinishedMatch(db, {
+      id,
+      kickoff: `2026-06-10T${String(id).padStart(2, '0')}:00:00Z`,
+      homeScore: 1,
+      awayScore: 1,
+    });
+    insertHistoricalOpinion(db, {
+      matchId: id,
+      generatedAt: '2026-06-10T00:00:00Z',
+      modelVersion: 'codex-book-v73',
+      probabilities: { home: 0.52, draw: 0.36, away: 0.12 },
+      totals: [],
+      forcedMarket: '1X2',
+      forcedSelection: 'draw',
+      confidenceScore: 52,
+    });
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+  const oldGuard = opinion.diagnostics.draw_favorite_conviction;
+  const guard = opinion.diagnostics.forced_draw_conviction;
+
+  assert.equal(opinion.forced_pick_market, '1X2');
+  assert.equal(opinion.forced_pick_selection, 'draw');
+  assert.equal(oldGuard.applied, false);
+  assert.equal(guard.available, true);
+  assert.equal(guard.applied, true);
+  assert.equal(guard.hit_rate, 1);
+  assert.ok(guard.effective_n >= 5);
+  assert.ok(guard.confidence_gap >= 0.35);
+  assert.equal(guard.target_draw, 0.58);
+  assert.ok(guard.draw_delta > 0);
+  assert.ok(opinion.probabilities.draw > guard.draw_prob);
+  assert.match(opinion.summary, /Choix nul confirme/);
 });
 
 test('generateCodexOpinion : transfere le reliquat outsider des bandes de nul central', () => {
