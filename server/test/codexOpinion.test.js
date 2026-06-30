@@ -81,7 +81,7 @@ test('generateCodexOpinion : crée un avis avec 1X2, Over/Under, cotes théoriqu
   });
 
   const opinion = generateCodexOpinion(db, 1);
-  assert.equal(opinion.model_version, 'codex-book-v21');
+  assert.equal(opinion.model_version, 'codex-book-v22');
   assert.equal(opinion.probabilities.home > opinion.probabilities.away, true);
   assert.equal(Math.round(Object.values(opinion.probabilities).reduce((s, p) => s + p, 0) * 100), 100);
   assert.equal(opinion.fair_odds.home > 1, true);
@@ -341,6 +341,31 @@ test('generateCodexOpinion : en KO avec marche, compresse un favori tres haut su
   assert.ok(opinion.probabilities.draw > 0.18);
   assert.ok(opinion.probabilities.home < 0.76);
   assert.match(opinion.summary, /Format KO 90 min/);
+});
+
+test('generateCodexOpinion : protege un plancher de nul 90 min KO apres calibration', () => {
+  const db = freshDb();
+  db.prepare("UPDATE matches SET stage = 'R32', group_code = NULL WHERE id = 1").run();
+  for (const [bookmaker, home, draw, away] of [
+    ['book-a', 1.26, 5.80, 12.50],
+    ['book-b', 1.24, 5.60, 13.00],
+  ]) {
+    for (const [outcome, price] of [['home', home], ['draw', draw], ['away', away]]) {
+      db.prepare(`
+        INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+        VALUES (1, @bookmaker, 'h2h', @outcome, @price, '2026-06-11T08:00:00Z')
+      `).run({ bookmaker, outcome, price });
+    }
+  }
+
+  const opinion = generateCodexOpinion(db, 1);
+
+  assert.equal(opinion.diagnostics.knockout_draw_floor_guard.available, true);
+  assert.equal(opinion.diagnostics.knockout_draw_floor_guard.applied, true);
+  assert.ok(opinion.diagnostics.knockout_draw_floor_guard.draw_delta > 0);
+  assert.ok(opinion.probabilities.draw >= 0.22);
+  assert.ok(opinion.probabilities.home < 0.73);
+  assert.match(opinion.summary, /Plancher KO 90 min/);
 });
 
 test('generateCodexOpinion : en KO sans cotes, integre l ecart de recuperation', () => {
