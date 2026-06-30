@@ -33,6 +33,54 @@ function Kpi({ label, value, sub }) {
   );
 }
 
+function AuditTable({ title, rows = [] }) {
+  if (!rows.length) return null;
+  return (
+    <section className="card codex-audit-card">
+      <h3>{title}</h3>
+      <div className="codex-audit-table">
+        <div className="codex-audit-head">
+          <span>Segment</span>
+          <span>N</span>
+          <span>Hit</span>
+          <span>Brier</span>
+          <span>Conf.</span>
+        </div>
+        {rows.map((row) => (
+          <div className="codex-audit-row" key={`${title}-${row.key}`}>
+            <b>{row.key}</b>
+            <span className="num">{row.n}</span>
+            <span className="num">{ratioLabel(row.hit_rate)}</span>
+            <span className="num">{row.average_brier == null ? 'n/a' : Number(row.average_brier).toFixed(3)}</span>
+            <span className="num">{row.avg_confidence == null ? 'n/a' : Math.round(Number(row.avg_confidence))}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AuditPanel({ audit }) {
+  if (!audit?.latest_prematch) return null;
+  const latest = audit.latest_prematch;
+  return (
+    <div className="codex-audit">
+      <div className="codex-audit-strip">
+        <Kpi label="Dernier avis par match" value={latest.n ?? 0} sub="echantillon audit" />
+        <Kpi label="Hit audit" value={ratioLabel(latest.hit_rate)} sub={`${latest.correct_count ?? 0}/${(latest.correct_count || 0) + (latest.incorrect_count || 0)} choix`} />
+        <Kpi label="Brier audit" value={latest.average_brier == null ? 'n/a' : Number(latest.average_brier).toFixed(3)} sub="dernier pre-match" />
+        <Kpi label="Confiance moyenne" value={latest.avg_confidence == null ? 'n/a' : Math.round(Number(latest.avg_confidence))} sub="dernier pre-match" />
+      </div>
+      <div className="codex-audit-grid">
+        <AuditTable title="Par marche" rows={audit.by_market} />
+        <AuditTable title="Par stade" rows={audit.by_stage} />
+        <AuditTable title="Par confiance" rows={audit.by_confidence} />
+        <AuditTable title="Zones a surveiller" rows={audit.weak_segments} />
+      </div>
+    </div>
+  );
+}
+
 function OpinionRow({ opinion, match }) {
   const ev = opinion.evaluation || {};
   const probs = opinion.probabilities || {};
@@ -109,6 +157,7 @@ export default function AvisCodex() {
   if (error) return <div className="errbox">{error.message}</div>;
 
   const summary = data?.summary || {};
+  const audit = data?.audit || null;
   const matches = data?.matches || [];
   return (
     <>
@@ -123,6 +172,7 @@ export default function AvisCodex() {
         <Kpi label="Favori modèle" value={ratioLabel(summary.favorite_hit_rate)} sub="sorti vainqueur" />
         <Kpi label="Hors bilan" value={summary.after_kickoff_count ?? 0} sub="après coup/live" />
       </div>
+      <AuditPanel audit={audit} />
 
       {matches.length ? (
         <div className="codex-ledger">

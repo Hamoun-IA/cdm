@@ -472,6 +472,11 @@ test('codexOpinionHistory : rassemble les avis termines et compte seulement le p
   assert.equal(history.summary.after_kickoff_count, 1);
   assert.equal(history.summary.correct_count, 1);
   assert.equal(history.summary.hit_rate, 1);
+  assert.equal(history.audit.latest_prematch.n, 1);
+  assert.equal(history.audit.latest_prematch.hit_rate, 1);
+  assert.equal(history.audit.by_market[0].key, '1X2');
+  assert.equal(history.audit.by_stage[0].key, 'Groupe J1');
+  assert.equal(history.audit.by_confidence[0].key, 'Confiance moyenne');
   assert.equal(history.matches[0].match.home_display, 'Mexique');
   assert.equal(history.matches[0].opinions[0].evaluation.is_prematch, false);
   assert.equal(history.matches[0].opinions[1].evaluation.is_prematch, true);

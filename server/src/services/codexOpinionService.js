@@ -3815,6 +3815,14 @@ function mean(xs) {
   return round(values.reduce((s, x) => s + x, 0) / values.length);
 }
 
+function confidenceBand(score) {
+  const value = Number(score);
+  if (!Number.isFinite(value)) return 'Confiance inconnue';
+  if (value >= 68) return 'Confiance haute';
+  if (value >= 48) return 'Confiance moyenne';
+  return 'Confiance basse';
+}
+
 function matchFromCodexHistoryRow(row) {
   return decorateMatch({
     id: row.match_id,
@@ -3868,6 +3876,84 @@ function matchOpinionSummary(opinions) {
   };
 }
 
+function latestPrematchOpinion(entry) {
+  return entry.opinions.find((opinion) => opinion.evaluation?.is_prematch === true) || null;
+}
+
+function auditMetric(label, opinions) {
+  const counted = opinions.filter((opinion) =>
+    opinion?.evaluation?.settled &&
+    opinion.evaluation.is_prematch === true &&
+    ['hit', 'miss', 'push'].includes(opinion.evaluation.verdict)
+  );
+  const hits = counted.filter((opinion) => opinion.evaluation.verdict === 'hit').length;
+  const misses = counted.filter((opinion) => opinion.evaluation.verdict === 'miss').length;
+  const pushes = counted.filter((opinion) => opinion.evaluation.verdict === 'push').length;
+  const decisive = hits + misses;
+  const favorites = counted.filter((opinion) => opinion.evaluation.favorite_hit != null);
+  return {
+    key: label,
+    n: counted.length,
+    correct_count: hits,
+    incorrect_count: misses,
+    neutral_count: pushes,
+    hit_rate: decisive ? round(hits / decisive) : null,
+    favorite_hit_rate: favorites.length
+      ? round(favorites.filter((opinion) => opinion.evaluation.favorite_hit).length / favorites.length)
+      : null,
+    average_brier: mean(counted.map((opinion) => opinion.evaluation.brier_score)),
+    avg_confidence: mean(counted.map((opinion) => opinion.confidence_score)),
+  };
+}
+
+function groupedAudit(opinions, keyFn) {
+  const groups = new Map();
+  for (const opinion of opinions) {
+    const key = keyFn(opinion);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(opinion);
+  }
+  return [...groups.entries()]
+    .map(([key, values]) => auditMetric(key, values))
+    .filter((metric) => metric.n > 0)
+    .sort((a, b) => b.n - a.n || String(a.key).localeCompare(String(b.key)));
+}
+
+function codexHistoryAudit(matches) {
+  const latestPrematch = matches
+    .map((entry) => {
+      const opinion = latestPrematchOpinion(entry);
+      return opinion ? { ...opinion, audit_match: entry.match } : null;
+    })
+    .filter(Boolean);
+  const base = auditMetric('Dernier avis pre-match', latestPrematch);
+  const byMarket = groupedAudit(latestPrematch, (opinion) => opinion.forced_pick_market || 'Marche inconnu');
+  const byStage = groupedAudit(latestPrematch, (opinion) => {
+    const match = opinion.audit_match || {};
+    return match.stage === 'GROUP' ? `Groupe J${match.matchday}` : (match.stage || 'Stage inconnu');
+  });
+  const byConfidence = groupedAudit(latestPrematch, (opinion) => confidenceBand(opinion.confidence_score));
+  const weakSegments = [...byMarket, ...byStage, ...byConfidence]
+    .filter((metric) => metric.n >= 3 && (
+      (metric.hit_rate != null && metric.hit_rate < 0.55) ||
+      (metric.average_brier != null && metric.average_brier > 0.55)
+    ))
+    .sort((a, b) => {
+      const brierGap = (b.average_brier ?? 0) - (a.average_brier ?? 0);
+      if (Math.abs(brierGap) > 0.0001) return brierGap;
+      return (a.hit_rate ?? 1) - (b.hit_rate ?? 1);
+    })
+    .slice(0, 6);
+
+  return {
+    latest_prematch: base,
+    by_market: byMarket,
+    by_stage: byStage,
+    by_confidence: byConfidence,
+    weak_segments: weakSegments,
+  };
+}
+
 export function codexOpinionHistory(db) {
   const rows = db.prepare(`
     SELECT co.*,
@@ -3906,6 +3992,7 @@ export function codexOpinionHistory(db) {
   }));
   return {
     summary: matchOpinionSummary(allOpinions),
+    audit: codexHistoryAudit(matches),
     matches_count: matches.length,
     matches,
   };
