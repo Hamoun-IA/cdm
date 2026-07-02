@@ -115,8 +115,105 @@ function codexAgentFocus(audit) {
   return focus.slice(0, 6);
 }
 
+function roundMetric(n, decimals = 4) {
+  if (!Number.isFinite(Number(n))) return null;
+  const factor = 10 ** decimals;
+  return Math.round(Number(n) * factor) / factor;
+}
+
+function averageMetric(values) {
+  const nums = values.filter((value) => Number.isFinite(Number(value))).map(Number);
+  if (!nums.length) return null;
+  return roundMetric(nums.reduce((sum, value) => sum + value, 0) / nums.length);
+}
+
+function legacyAuditMetric(key, opinions) {
+  const counted = opinions.filter((opinion) => (
+    opinion.evaluation?.settled &&
+    opinion.evaluation?.is_prematch === true &&
+    ['hit', 'miss', 'push'].includes(opinion.evaluation.verdict)
+  ));
+  const correctCount = counted.filter((opinion) => opinion.evaluation.verdict === 'hit').length;
+  const incorrectCount = counted.filter((opinion) => opinion.evaluation.verdict === 'miss').length;
+  const neutralCount = counted.filter((opinion) => opinion.evaluation.verdict === 'push').length;
+  const decisive = correctCount + incorrectCount;
+  const favoriteRated = counted.filter((opinion) => opinion.evaluation.favorite_hit != null);
+  const hitRate = decisive ? roundMetric(correctCount / decisive) : null;
+  const avgConfidence = averageMetric(counted.map((opinion) => opinion.confidence_score));
+  return {
+    key,
+    audit_kind: 'legacy',
+    n: counted.length,
+    hit_rate: hitRate,
+    favorite_hit_rate: favoriteRated.length
+      ? roundMetric(favoriteRated.filter((opinion) => opinion.evaluation.favorite_hit).length / favoriteRated.length)
+      : null,
+    average_brier: averageMetric(counted.map((opinion) => opinion.evaluation.brier_score)),
+    avg_confidence: avgConfidence,
+    confidence_gap: hitRate == null || avgConfidence == null ? null : roundMetric(hitRate - (avgConfidence / 100)),
+    correct_count: correctCount,
+    incorrect_count: incorrectCount,
+    neutral_count: neutralCount,
+  };
+}
+
+function legacyCodexAudit(history) {
+  const opinions = (history?.matches || []).flatMap((entry) => (
+    (entry.opinions || []).map((opinion) => ({ ...opinion, match: entry.match }))
+  ));
+  const prematch = opinions.filter((opinion) => opinion.evaluation?.is_prematch === true);
+  const byMarket = new Map();
+  for (const opinion of prematch) {
+    const key = opinion.forced_pick_market || 'Marche inconnu';
+    if (!byMarket.has(key)) byMarket.set(key, []);
+    byMarket.get(key).push(opinion);
+  }
+  const byMarketMetrics = [...byMarket.entries()]
+    .map(([key, rows]) => legacyAuditMetric(key, rows))
+    .sort((a, b) => (b.n || 0) - (a.n || 0));
+  const probabilityAlerts = prematch
+    .filter((opinion) => opinion.evaluation?.brier_score != null)
+    .sort((a, b) => Number(b.evaluation.brier_score || 0) - Number(a.evaluation.brier_score || 0))
+    .slice(0, 12)
+    .map((opinion) => {
+      const probs = opinion.probabilities || {};
+      const actual = opinion.evaluation.actual_h2h;
+      const favorite = opinion.evaluation.favorite_selection;
+      const favoriteProbability = favorite ? Number(probs[favorite]) : null;
+      const actualProbability = actual ? Number(probs[actual]) : null;
+      const match = opinion.match || {};
+      return {
+        match_id: match.id,
+        fifa_match_number: match.fifa_match_number,
+        match_label: `${match.home_display || match.home_name || match.home_placeholder || 'Equipe A'} - ${match.away_display || match.away_name || match.away_placeholder || 'Equipe B'}`,
+        stage_label: match.stage,
+        score: opinion.evaluation.actual_score,
+        verdict: opinion.evaluation.verdict,
+        forced_pick_label: opinion.forced_pick_label,
+        favorite_label: opinion.evaluation.favorite_label,
+        actual_h2h_label: opinion.evaluation.actual_h2h_label,
+        favorite_probability: Number.isFinite(favoriteProbability) ? roundMetric(favoriteProbability) : null,
+        actual_probability: Number.isFinite(actualProbability) ? roundMetric(actualProbability) : null,
+        probability_gap: Number.isFinite(favoriteProbability) && Number.isFinite(actualProbability)
+          ? roundMetric(favoriteProbability - actualProbability)
+          : null,
+        brier_score: opinion.evaluation.brier_score,
+        confidence_score: opinion.confidence_score,
+      };
+    });
+  return {
+    latest_prematch: legacyAuditMetric('latest_prematch', prematch),
+    by_market: byMarketMetrics,
+    by_stage: [],
+    by_confidence: [],
+    weak_segments: byMarketMetrics.filter((metric) => metric.n >= 2 && metric.hit_rate != null && metric.hit_rate < 0.5),
+    probability_alerts: probabilityAlerts,
+  };
+}
+
 function codexAuditForAgents(db) {
-  const { audit } = codexOpinionHistory(db);
+  const history = codexOpinionHistory(db);
+  const audit = history.audit || legacyCodexAudit(history);
   return {
     model_version: CURRENT_CODEX_MODEL_VERSION,
     sample: compactAuditMetric(audit.latest_prematch),
