@@ -117,12 +117,37 @@ const finished = db.prepare(`
 `).all();
 const deleteFutureOdds = db.prepare('DELETE FROM odds_snapshots WHERE match_id = ? AND taken_at > ?');
 const updateGeneratedAt = db.prepare('UPDATE sol_opinions SET generated_at = ? WHERE id = ?');
+const hideResult = db.prepare(`
+  UPDATE matches
+  SET status = 'TIMED',
+      home_score = NULL,
+      away_score = NULL,
+      home_score_final = NULL,
+      away_score_final = NULL,
+      penalties = NULL
+  WHERE id = ?
+`);
+const restoreResult = db.prepare(`
+  UPDATE matches
+  SET status = @status,
+      home_score = @home_score,
+      away_score = @away_score,
+      home_score_final = @home_score_final,
+      away_score_final = @away_score_final,
+      penalties = @penalties
+  WHERE id = @id
+`);
+
+db.transaction((matches) => {
+  for (const match of matches) hideResult.run(match.id);
+})(finished);
 
 for (const match of finished) {
   const generatedAt = minusMinutes(match.kickoff_utc, cutoffMinutes);
   deleteFutureOdds.run(match.id, generatedAt);
   const opinion = generateSolOpinion(db, match.id);
   updateGeneratedAt.run(generatedAt, opinion.id);
+  restoreResult.run(match);
 }
 
 const rows = db.prepare(`

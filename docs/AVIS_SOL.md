@@ -39,6 +39,11 @@ peut déplacer la projection, mais ne doit pas écraser l'information collective
 Le replay v1 a été exécuté sur 96 matchs terminés, avec une coupure des données
 15 minutes avant chaque coup d'envoi :
 
+Au démarrage, tous les résultats sont retirés de la copie. Chaque score n'est
+restauré qu'après l'enregistrement de la prédiction correspondante ; il devient
+alors disponible uniquement pour les matchs suivants, comme il l'aurait été en
+conditions réelles.
+
 - Brier Sol : `0,483` ;
 - Brier du consensus de marché : `0,484` ;
 - choix forcé correct hors pushes : `62/91`, soit `68,1 %` ;
