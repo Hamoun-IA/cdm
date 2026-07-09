@@ -18,6 +18,7 @@ import Risques from './views/Risques.jsx';
 import Sources from './views/Sources.jsx';
 import Matin from './views/Matin.jsx';
 import AvisCodex from './views/AvisCodex.jsx';
+import AvisSol from './views/AvisSol.jsx';
 import AnalyseDirect from './views/AnalyseDirect.jsx';
 
 function useHashRoute() {
@@ -32,7 +33,7 @@ function useHashRoute() {
 }
 
 const TABS = [
-  ['matin', 'Matin'], ['a-decider', 'À décider'], ['matchs', 'Matchs'], ['analyse-direct', 'Analyse en direct'], ['avis-codex', 'Avis Codex'], ['groupes', 'Groupes'], ['paris', 'Paris'],
+  ['matin', 'Matin'], ['a-decider', 'À décider'], ['matchs', 'Matchs'], ['analyse-direct', 'Analyse en direct'], ['avis-codex', 'Avis Codex'], ['avis-sol', 'Avis Sol'], ['groupes', 'Groupes'], ['paris', 'Paris'],
   ['risques', 'Risques'], ['sources', 'Sources'], ['equipes', 'Équipes'], ['bracket', 'Tableau'],
 ];
 
@@ -48,6 +49,7 @@ export default function App() {
   else if (view === 'sources') page = <Sources />;
   else if (view === 'analyse-direct') page = <AnalyseDirect />;
   else if (view === 'avis-codex') page = <AvisCodex />;
+  else if (view === 'avis-sol') page = <AvisSol />;
   else if (view === 'groupes') page = <Groupes />;
   else if (view === 'equipes') page = param ? <EquipeDetail id={param} /> : <Equipes />;
   else if (view === 'bracket') page = <Bracket />;

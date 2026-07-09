@@ -20,6 +20,8 @@
   --amber-bg: rgba(217, 161, 63, .12);
   --brick: #e06c5a;        /* perdu / éliminé */
   --brick-bg: rgba(224, 108, 90, .12);
+  --sol: #52b7c7;
+  --sol-bg: rgba(82, 183, 199, .10);
   --strip-bg: #12211a;     /* fond du matchday strip */
   --strip-line: #1f3328;
   --strip-soft: #7da58e;
@@ -434,6 +436,15 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
   letter-spacing: .06em;
 }
 .codex-confidence .num { color: var(--amber); }
+.sol-card { border-left-color: var(--sol); }
+.sol-card .codex-kicker,
+.sol-card .codex-confidence .num { color: var(--sol); }
+.sol-card .codex-forced {
+  border-left-color: var(--sol);
+  background: var(--sol-bg);
+}
+.sol-action { border-color: rgba(82, 183, 199, .45); }
+.sol-action:hover { border-color: var(--sol); }
 .codex-body {
   display: grid;
   gap: .65rem;
@@ -888,6 +899,10 @@ form.encode { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; p
 .codex-history-item.is-after-kickoff {
   opacity: .72;
 }
+.sol-view-title { border-left-color: var(--sol); }
+.sol-kpi { border-top-color: var(--sol); }
+.sol-ledger-card { border-left: 3px solid var(--sol); }
+.sol-history-item .codex-history-pick b { color: var(--sol); }
 
 /* ── Analyse en direct ───────────────────────────────────────────── */
 .live-board {

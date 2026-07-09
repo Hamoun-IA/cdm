@@ -11,7 +11,8 @@
     "backup": "node src/backup.js",
     "backup:loop": "node src/backup.js --loop",
     "test": "node --test",
-    "replay:codex": "node src/tools/replayCodexOpinion.js"
+    "replay:codex": "node src/tools/replayCodexOpinion.js",
+    "replay:sol": "node src/tools/replaySolOpinion.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.0",

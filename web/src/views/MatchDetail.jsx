@@ -235,6 +235,68 @@ function CodexOpinion({ opinion, match, meta }) {
   );
 }
 
+function SolOpinion({ opinion, match, meta }) {
+  if (!opinion) return null;
+  const probs = opinion.probabilities || {};
+  const fair = opinion.fair_odds || {};
+  const staleModel = !!(meta?.needs_recalculation && meta?.opinion_model_version);
+  const h2h = [
+    ['home', match.home_display],
+    ['draw', 'Nul'],
+    ['away', match.away_display],
+  ];
+  return (
+    <div className="card codex-card sol-card">
+      <div className="codex-head">
+        <div>
+          <div className="codex-kicker">Avis Sol</div>
+          <h3>{opinion.headline}</h3>
+          {staleModel ? <span className="codex-version-badge">modèle à recalculer</span> : null}
+        </div>
+        <div className="confidence-chip codex-confidence">
+          <span className="num">{opinion.confidence_score}</span>
+          <span>confiance</span>
+        </div>
+      </div>
+      <div className="codex-body">
+        <p className="codex-summary">{opinion.summary}</p>
+        <div className="codex-strip">
+          {h2h.map(([key, label]) => (
+            <div key={key} className="codex-prob">
+              <span>{label}</span>
+              <b>{pct0(probs[key])}</b>
+              <em>cote {fair[key]?.toFixed ? fair[key].toFixed(2) : fair[key] || '—'}</em>
+            </div>
+          ))}
+        </div>
+        {opinion.totals?.length ? (
+          <div className="codex-totals">
+            {opinion.totals.map((line) => (
+              <div key={line.line} className="codex-total-line">
+                <span>O/U {line.line}{line.synthetic ? ' · modèle' : ''}</span>
+                <b>Over {pct0(line.probs?.over)} · Under {pct0(line.probs?.under)}</b>
+                <em>cotes {fmtOdds(line.fair_odds?.over)} / {fmtOdds(line.fair_odds?.under)}</em>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <div className="codex-forced">
+          <span>Si Sol doit trancher</span>
+          <b>{opinion.forced_pick_label}</b>
+          <em>{opinion.forced_pick_market}</em>
+        </div>
+        <div className="codex-meta">
+          <span>{opinion.change_summary}</span>
+          <span>
+            {opinion.generated_at?.slice(0, 16).replace('T', ' ')} UTC · {opinion.model_version}
+            {staleModel ? ` · courant ${meta.current_model_version}` : ''}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function fmtOdds(x) {
   return x == null ? '—' : Number(x).toFixed(2);
 }
@@ -603,6 +665,7 @@ export default function MatchDetail({ id }) {
   // Analyse à la demande : 202 immédiat, puis on guette la nouvelle fiche intel.
   const [analyzing, setAnalyzing] = useState(null); // null | 'pending' | message d'erreur
   const [codexing, setCodexing] = useState(null); // null | 'pending' | message d'erreur
+  const [soling, setSoling] = useState(null); // null | 'pending' | message d'erreur
   const [comboing, setComboing] = useState(null); // null | 'pending' | message d'erreur
   const [preparing, setPreparing] = useState(false);
   const [preparation, setPreparation] = useState(null);
@@ -672,12 +735,25 @@ export default function MatchDetail({ id }) {
     }
   };
 
+  const requestSolOpinion = async () => {
+    setSoling('pending');
+    try {
+      await api(`/matches/${id}/sol-opinion`, { method: 'POST' });
+      setSoling(null);
+      reload();
+    } catch (e) {
+      setSoling(e.message);
+    }
+  };
+
   if (loading) return <div className="loading">Chargement…</div>;
   if (!data?.match) return <div className="errbox">Match introuvable.</div>;
   const m = data.match;
   const live = ['IN_PLAY', 'PAUSED'].includes(m.status);
   const codexMeta = data.codex_opinion_meta || {};
   const staleCodexOpinion = !!(codexMeta.needs_recalculation && data.codex_opinion);
+  const solMeta = data.sol_opinion_meta || {};
+  const staleSolOpinion = !!(solMeta.needs_recalculation && data.sol_opinion);
 
   // historique de la cote du meilleur book par outcome (pour la sparkline)
   const histByOutcome = {};
@@ -708,6 +784,8 @@ export default function MatchDetail({ id }) {
 
       <CodexOpinion opinion={data.codex_opinion} match={m} meta={codexMeta} />
 
+      <SolOpinion opinion={data.sol_opinion} match={m} meta={solMeta} />
+
       <CodexCombo
         combo={data.codex_combo}
         onGenerate={requestCodexCombo}
@@ -727,12 +805,19 @@ export default function MatchDetail({ id }) {
         <button className="ghost" disabled={codexing === 'pending'} onClick={requestCodexOpinion}>
           {codexing === 'pending' ? 'Avis Codex…' : staleCodexOpinion ? 'Recalculer Avis Codex' : 'Avis Codex'}
         </button>
+        <button className="ghost sol-action" disabled={soling === 'pending'} onClick={requestSolOpinion}>
+          {soling === 'pending' ? 'Avis Sol…' : staleSolOpinion ? 'Recalculer Avis Sol' : 'Avis Sol'}
+        </button>
         {staleCodexOpinion && (
           <span className="small muted">dernier avis {codexMeta.opinion_model_version}, modèle courant {codexMeta.current_model_version}</span>
+        )}
+        {staleSolOpinion && (
+          <span className="small muted">dernier avis Sol {solMeta.opinion_model_version}, modèle courant {solMeta.current_model_version}</span>
         )}
         {analyzing === 'pending' && <span className="small muted">le Scout enquête, la fiche apparaîtra ici (~2 min)</span>}
         {analyzing && analyzing !== 'pending' && <span className="small" style={{ color: 'var(--brick)' }}>{analyzing}</span>}
         {codexing && codexing !== 'pending' && <span className="small" style={{ color: 'var(--brick)' }}>{codexing}</span>}
+        {soling && soling !== 'pending' && <span className="small" style={{ color: 'var(--brick)' }}>{soling}</span>}
       </div>
       {preparation?.error && <div className="errbox" style={{ marginBottom: '.7rem' }}>{preparation.error}</div>}
       {preparation?.checklist?.length ? (

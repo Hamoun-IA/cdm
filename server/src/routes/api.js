@@ -25,6 +25,7 @@ import { matchdayMorning } from '../services/matchdayMorningService.js';
 import { buildMatchOpinion } from '../services/matchOpinionService.js';
 import { codexComboForMatch } from '../services/codexComboService.js';
 import { codexOpinionHistory, codexOpinionMeta, generateCodexOpinion, latestCodexOpinion } from '../services/codexOpinionService.js';
+import { generateSolOpinion, latestSolOpinion, solOpinionHistory, solOpinionMeta } from '../services/solOpinionService.js';
 import { liveAnalysisDashboard, reviseLiveOpinion } from '../services/liveAnalysisService.js';
 
 const MATCH_SELECT = `
@@ -78,6 +79,10 @@ export function apiRouter(db, { notify = null } = {}) {
 
   r.get('/codex-opinions/history', (req, res) => {
     res.json(codexOpinionHistory(db));
+  });
+
+  r.get('/sol-opinions/history', (req, res) => {
+    res.json(solOpinionHistory(db));
   });
 
   r.get('/live-analysis', (req, res, next) => {
@@ -149,6 +154,7 @@ export function apiRouter(db, { notify = null } = {}) {
     const stats = db.prepare('SELECT * FROM match_stats WHERE match_id = ?').all(row.id);
     const match = decorateMatch(db, row);
     const codex_opinion = latestCodexOpinion(db, row.id);
+    const sol_opinion = latestSolOpinion(db, row.id);
     res.json({
       match, bets, suggestions, odds_snapshots: odds, stats,
       opinion: buildMatchOpinion({
@@ -168,6 +174,8 @@ export function apiRouter(db, { notify = null } = {}) {
       codex_opinion,
       codex_opinion_meta: codexOpinionMeta(codex_opinion),
       codex_combo: codexComboForMatch(db, row.id),
+      sol_opinion,
+      sol_opinion_meta: solOpinionMeta(sol_opinion),
       timeline: matchTimeline(db, row.id),
     });
   });
@@ -199,6 +207,13 @@ export function apiRouter(db, { notify = null } = {}) {
   r.post('/matches/:id/codex-opinion', (req, res, next) => {
     try {
       res.status(201).json({ codex_opinion: generateCodexOpinion(db, Number(req.params.id)) });
+    } catch (e) { next(e); }
+  });
+
+  r.post('/matches/:id/sol-opinion', (req, res, next) => {
+    try {
+      const solOpinion = generateSolOpinion(db, Number(req.params.id));
+      res.status(solOpinion.reused ? 200 : 201).json({ sol_opinion: solOpinion });
     } catch (e) { next(e); }
   });
 
