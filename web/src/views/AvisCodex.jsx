@@ -158,7 +158,7 @@ function OpinionRow({ opinion, match }) {
 }
 
 function MatchBlock({ entry }) {
-  const { match, opinions, summary } = entry;
+  const { match, opinions, summary, revisions_count: revisionsCount = 0 } = entry;
   return (
     <section className="card codex-ledger-card">
       <a className="codex-ledger-head" href={`#/matchs/${match.id}`}>
@@ -178,6 +178,7 @@ function MatchBlock({ entry }) {
         {summary.neutral_count ? <span className="tag amber">{summary.neutral_count} neutre</span> : null}
         <span className="tag ink">{summary.prematch_count} pré-match</span>
         {summary.after_kickoff_count ? <span className="tag ink">{summary.after_kickoff_count} hors bilan</span> : null}
+        {revisionsCount ? <span className="tag ink">{revisionsCount} version{revisionsCount > 1 ? 's' : ''} archivée{revisionsCount > 1 ? 's' : ''}</span> : null}
         <span className="small muted">{brierLabel(summary.average_brier)}</span>
       </div>
       <div className="codex-history-list">
@@ -202,11 +203,11 @@ export default function AvisCodex() {
         <span className="note">{data?.matches_count || 0} matchs terminés suivis</span>
       </h2>
       <div className="kpis">
-        <Kpi label="Avis pré-match" value={summary.prematch_count ?? 0} sub={`${summary.opinions_count ?? 0} avis au total`} />
+        <Kpi label="Avis pré-match" value={summary.prematch_count ?? 0} sub="un avis de référence par match" />
         <Kpi label="Choix corrects" value={ratioLabel(summary.hit_rate)} sub={`${summary.correct_count ?? 0}/${(summary.correct_count || 0) + (summary.incorrect_count || 0)} décisions`} />
         <Kpi label="Brier moyen" value={summary.average_brier == null ? '—' : Number(summary.average_brier).toFixed(3)} sub="1X2 pré-match" />
         <Kpi label="Favori modèle" value={ratioLabel(summary.favorite_hit_rate)} sub="sorti vainqueur" />
-        <Kpi label="Hors bilan" value={summary.after_kickoff_count ?? 0} sub="après coup/live" />
+        <Kpi label="Versions archivées" value={summary.archived_revisions_count ?? 0} sub="conservées, hors statistiques" />
       </div>
       <AuditPanel audit={audit} />
 

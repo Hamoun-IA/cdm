@@ -995,6 +995,12 @@ function matchOpinionSummary(opinions) {
   };
 }
 
+function referenceOpinion(opinions) {
+  return opinions.find((opinion) => opinion.evaluation?.is_prematch === true)
+    || opinions[0]
+    || null;
+}
+
 export function codexOpinionHistory(db) {
   const rows = db.prepare(`
     SELECT co.*,
@@ -1014,7 +1020,6 @@ export function codexOpinionHistory(db) {
   `).all();
 
   const byMatch = new Map();
-  const allOpinions = [];
   for (const row of rows) {
     const match = matchFromCodexHistoryRow(row);
     const opinion = decode(row);
@@ -1022,17 +1027,30 @@ export function codexOpinionHistory(db) {
       ...opinion,
       evaluation: evaluateCodexOpinion(opinion, match),
     };
-    allOpinions.push(evaluated);
     if (!byMatch.has(match.id)) byMatch.set(match.id, { match, opinions: [] });
     byMatch.get(match.id).opinions.push(evaluated);
   }
 
-  const matches = [...byMatch.values()].map((entry) => ({
-    ...entry,
-    summary: matchOpinionSummary(entry.opinions),
-  }));
+  const references = [];
+  const matches = [...byMatch.values()].map((entry) => {
+    const reference = referenceOpinion(entry.opinions);
+    const opinions = reference ? [reference] : [];
+    references.push(...opinions);
+    return {
+      match: entry.match,
+      opinions,
+      revisions_count: Math.max(0, entry.opinions.length - opinions.length),
+      stored_opinions_count: entry.opinions.length,
+      summary: matchOpinionSummary(opinions),
+    };
+  });
+  const summary = {
+    ...matchOpinionSummary(references),
+    archived_revisions_count: Math.max(0, rows.length - references.length),
+    stored_opinions_count: rows.length,
+  };
   return {
-    summary: matchOpinionSummary(allOpinions),
+    summary,
     matches_count: matches.length,
     matches,
   };
@@ -1115,6 +1133,13 @@ export function generateCodexOpinion(db, matchId) {
     live_context: live,
   };
   const hash = inputHash(sourceShape);
+  if (previous?.model_version === MODEL_VERSION && previous.input_hash === hash) {
+    return {
+      ...previous,
+      reused: true,
+      change_summary: 'Aucun changement matériel détecté depuis le dernier Avis Codex.',
+    };
+  }
   const sources = {
     hash,
     market: !!market,

@@ -122,22 +122,27 @@ test('generateCodexOpinion : ignore les lignes Over Under entieres et quart de b
   assert.equal(opinion.forced_pick_market.includes('OU_2.75'), false);
 });
 
-test('generateCodexOpinion : conserve l’historique et détecte une relance sans changement matériel', () => {
+test('generateCodexOpinion : reutilise un avis sans changement materiel', () => {
   const db = freshDb();
   insertMarket(db);
   const first = generateCodexOpinion(db, 1);
   const second = generateCodexOpinion(db, 1);
 
-  assert.equal(second.previous_opinion_id, first.id);
+  assert.equal(second.id, first.id);
+  assert.equal(second.reused, true);
   assert.equal(second.input_hash, first.input_hash);
   assert.match(second.change_summary, /Aucun changement matériel/);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM codex_opinions WHERE match_id = 1').get().n, 2);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM codex_opinions WHERE match_id = 1').get().n, 1);
 });
 
 test('listCodexOpinions : evalue l historique une fois le match termine', () => {
   const db = freshDb();
   insertMarket(db);
   const first = generateCodexOpinion(db, 1);
+  db.prepare(`
+    INSERT INTO odds_snapshots (match_id, bookmaker, market, outcome, price, taken_at)
+    VALUES (1, 'second-book', 'h2h', 'home', 1.6, '2026-06-11T09:00:00Z')
+  `).run();
   const second = generateCodexOpinion(db, 1);
   db.prepare("UPDATE matches SET status = 'FINISHED', home_score = 2, away_score = 0 WHERE id = 1").run();
 
@@ -176,7 +181,7 @@ test('listCodexOpinions : marque un Over Under exact comme neutre', () => {
   assert.equal(opinion.evaluation.forced_actual_label, 'Push 2');
 });
 
-test('codexOpinionHistory : rassemble les avis termines et compte seulement le pre-match', () => {
+test('codexOpinionHistory : compte un avis de reference par match', () => {
   const db = freshDb();
   insertHistoricalOpinion(db, {
     matchId: 1,
@@ -195,14 +200,18 @@ test('codexOpinionHistory : rassemble les avis termines et compte seulement le p
   const history = codexOpinionHistory(db);
 
   assert.equal(history.matches_count, 1);
-  assert.equal(history.summary.opinions_count, 2);
+  assert.equal(history.summary.opinions_count, 1);
   assert.equal(history.summary.prematch_count, 1);
-  assert.equal(history.summary.after_kickoff_count, 1);
+  assert.equal(history.summary.after_kickoff_count, 0);
+  assert.equal(history.summary.archived_revisions_count, 1);
+  assert.equal(history.summary.stored_opinions_count, 2);
   assert.equal(history.summary.correct_count, 1);
   assert.equal(history.summary.hit_rate, 1);
   assert.equal(history.matches[0].match.home_display, 'Mexique');
-  assert.equal(history.matches[0].opinions[0].evaluation.is_prematch, false);
-  assert.equal(history.matches[0].opinions[1].evaluation.is_prematch, true);
+  assert.equal(history.matches[0].opinions.length, 1);
+  assert.equal(history.matches[0].opinions[0].evaluation.is_prematch, true);
+  assert.equal(history.matches[0].revisions_count, 1);
+  assert.equal(history.matches[0].stored_opinions_count, 2);
 });
 
 test('generateCodexOpinion : fonctionne sans cotes avec priors conservateurs', () => {
