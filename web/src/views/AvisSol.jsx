@@ -1,5 +1,5 @@
 import React from 'react';
-import { fmtPct, STAGE_FR, useApi } from '../api.js';
+import { fmtPct, STAGE_FR, matchScoreLabel, useApi } from '../api.js';
 import Flag from '../components/Flag.jsx';
 
 function pct(value) {
@@ -15,7 +15,7 @@ function stamp(iso) {
 }
 
 function score(match) {
-  return match.home_score == null || match.away_score == null ? '—' : `${match.home_score}-${match.away_score}`;
+  return matchScoreLabel(match);
 }
 
 function marketLabel(market) {

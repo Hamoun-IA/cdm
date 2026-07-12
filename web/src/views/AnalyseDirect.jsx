@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
-import { api, useApi, fmtPct, STAGE_FR, STATUS_FR } from '../api.js';
+import { api, useApi, fmtPct, STAGE_FR, STATUS_FR, matchScoreLabel } from '../api.js';
 import Flag from '../components/Flag.jsx';
 
 function scoreLabel(match) {
-  if (match.home_score == null || match.away_score == null) return '—';
-  return `${match.home_score}–${match.away_score}`;
+  return matchScoreLabel(match);
 }
 
 function pct(value, decimals = 0) {

@@ -1,7 +1,7 @@
 // Le « matchday strip » — bandeau signature : les matchs du jour sur toutes les
 // vues, heure Brussels, score live, pastille parié. Heartbeat du tournoi.
 import React from 'react';
-import { useApi } from '../api.js';
+import { matchScoreLabel, useApi } from '../api.js';
 import Flag from './Flag.jsx';
 
 export default function MatchdayStrip() {
@@ -25,7 +25,7 @@ export default function MatchdayStrip() {
             <span className="m">
               <span><Flag emoji={m.home_flag} /> {m.home_code || m.home_display}</span>
               <span className="sc num">
-                {m.home_score != null ? `${m.home_score}–${m.away_score}` : (done ? '—' : 'vs')}
+                {matchScoreLabel(m, done ? '—' : 'vs')}
               </span>
               <span>{m.away_code || m.away_display} <Flag emoji={m.away_flag} /></span>
             </span>

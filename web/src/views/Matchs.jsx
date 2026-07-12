@@ -1,6 +1,6 @@
 // Vue Matchs : timeline par jour, filtres groupe/équipe/phase, badge « parié ».
 import React, { useMemo, useState } from 'react';
-import { useApi, fmtDayFr, STAGE_FR, STATUS_FR } from '../api.js';
+import { useApi, fmtDayFr, STAGE_FR, STATUS_FR, matchScoreLabel } from '../api.js';
 import Flag from '../components/Flag.jsx';
 
 const GROUPS = 'ABCDEFGHIJKL'.split('');
@@ -55,10 +55,7 @@ export function MatchRow({ m }) {
     <a className="match-row" href={`#/matchs/${m.id}`}>
       <span className="ko num">{m.kickoff_brussels}</span>
       <span className="team h"><span className="nm">{m.home_display}</span> <Flag emoji={m.home_flag} /></span>
-      <span className={`score num ${live ? 'live' : ''}`}>
-        {m.home_score != null ? `${m.home_score}–${m.away_score}` : '–'}
-        {m.penalties ? <span className="small"> ({m.penalties} tab)</span> : null}
-      </span>
+      <span className={`score num ${live ? 'live' : ''}`}>{matchScoreLabel(m, '–')}</span>
       <span className="team"><Flag emoji={m.away_flag} /> <span className="nm">{m.away_display}</span></span>
       <span className="meta">
         {m.group_code ? `Gr. ${m.group_code} · J${m.matchday}` : STAGE_FR[m.stage]}

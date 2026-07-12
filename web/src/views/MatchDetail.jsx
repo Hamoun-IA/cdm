@@ -1,7 +1,7 @@
 // Détail match : tableau d'affichage, cotes (sparkline des snapshots),
 // marché dé-marginé, suggestions du pod et paris liés.
 import React, { useEffect, useRef, useState } from 'react';
-import { api, useApi, fmtEur, fmtPct, STAGE_FR, STATUS_FR, OUTCOME_FR } from '../api.js';
+import { api, useApi, fmtEur, fmtPct, STAGE_FR, STATUS_FR, OUTCOME_FR, matchScoreLabel } from '../api.js';
 import Flag from '../components/Flag.jsx';
 
 function Sparkline({ points }) {
@@ -768,7 +768,7 @@ export default function MatchDetail({ id }) {
         <div className="tm h">{m.home_display} <Flag emoji={m.home_flag} /></div>
         <div>
           <div className="big num">
-            {m.home_score != null ? `${m.home_score}–${m.away_score}` : m.kickoff_brussels}
+            {matchScoreLabel(m, m.kickoff_brussels)}
           </div>
           <div className="sub">
             {m.group_code ? `Groupe ${m.group_code} · J${m.matchday}` : STAGE_FR[m.stage]} ·{' '}

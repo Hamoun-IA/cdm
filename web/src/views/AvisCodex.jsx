@@ -1,5 +1,5 @@
 import React from 'react';
-import { fmtPct, STAGE_FR, useApi } from '../api.js';
+import { fmtPct, STAGE_FR, matchScoreLabel, useApi } from '../api.js';
 import Flag from '../components/Flag.jsx';
 
 function pct0(x) {
@@ -26,7 +26,7 @@ function pointGapLabel(value) {
 }
 
 function matchScore(match) {
-  return match.home_score == null || match.away_score == null ? 'n/a' : `${match.home_score}-${match.away_score}`;
+  return matchScoreLabel(match, 'n/a');
 }
 
 function Kpi({ label, value, sub }) {
